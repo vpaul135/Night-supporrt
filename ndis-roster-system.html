@@ -1,0 +1,1071 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Roster of Care — Service Tracking System</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>tailwind.config = { darkMode: 'class' };</script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Libre+Franklin:wght@600;700;800&display=swap" rel="stylesheet">
+<style>
+  body { font-family: 'Inter', sans-serif; }
+  .font-display { font-family: 'Libre Franklin', sans-serif; }
+  @media print {
+    .print-hidden { display: none !important; }
+  }
+</style>
+</head>
+<body class="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100 transition-colors">
+
+<div id="app"></div>
+<div id="modal-root"></div>
+
+<script>
+/* ---------------------------------------------------------
+   Config / constants
+--------------------------------------------------------- */
+const WEEK_ORDER = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
+const DAY_BY_INDEX = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+const CANCEL_REASONS = ["Participant cancelled","Hospital","Family visit","Sick","No staff","Weather","Other"];
+const FUNDING_TYPES = ["Core Support","Capacity Building","Capital Support","Other"];
+const SUPPORT_TYPE_SUGGESTIONS = ["Community Access","SIL","Community Support","Domestic Assistance","Personal Care","Shopping","Transport","Dialysis Transport","Social Support"];
+
+const SEED_PARTICIPANTS = ["Marlene Robertson","Christine Thompson","Janelle Kunia","Christine Brumby","Tanisha Tilmouth","Rosalie Petrick","Karen White"]
+  .map((name,i)=>({ id:"p"+(i+1), name, active:true }));
+
+const RATIOS = ["1:1","1:2","1:3","1:4","2:1"];
+const WD_SUN = ["Monday","Tuesday","Wednesday","Thursday","Friday","Sunday"];
+
+// Central NDIS Line Item master list — every dropdown in the app reads from state.lineItems,
+// which is seeded from this list and can be extended by the House Supervisor in the
+// Participants tab without touching code (see renderLineItemsManager()).
+const DEFAULT_LINE_ITEMS = [
+  "1:1 Community Access","1:2 Community Access","1:3 Community Access",
+  "1:1 SIL","1:2 SIL","1:3 SIL",
+  "Transport","Capacity Building","Other",
+];
+
+// Branding — Excel Care Group Australia, Alice Springs Branch.
+// Logo is embedded as base64 so the file stays a single, self-contained HTML page.
+const BRAND_NAME = "Excel Care Group";
+const BRAND_BRANCH = "Alice Springs Branch";
+const LOGO_B64 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAOEAAAA/CAYAAAAWh68lAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAC5rSURBVHhe7Z13nCRVub+fqurcPTmn3dmZ2RyB3SXDkgUUEIkCgopiuoro7+pFQIRrushVRFBRxEtQQZEgC0tYSQsbYHOYndnJOfT0hM7dVXV+f1RPT6cJu1wQr/PwOcvUqVOxz/eE97znlCSEEMwyyywzIkkukoSUuDN1PwASkBwnhIgfK4RATto7yyyzzJhUAWZkBolmRTjLLEfEDNSVAaOmnKgFmRXhLLO8n0iQ1jxN16/0Ye0TBiODNHQ/QufQKyiSmdrSS6ktvRiT4khNOsss7ztpMsnQHyQ1nZQuQiEEkiQlpJM+mJqwxxtB02eudYFgf8cDNPf9hUh0hGBkkPquB2nq+wtCqKnJZ5nlA2daAWZgvCmaygciwqcPetjYOoo29T3GiaqjdA69nBSn6WHcY7sIRT1J8bPM8qElkyhTNCj4gKyj7kCUe7f28lLTMOoMakRdqOh6ODUaXY+g69HU6Flm+YBJr83SmTxNYo0pfVA14aA3wppyJ99+sZWHd/Wj6iJl5CQZm7mQfNfSpDhJUsh21OKwlibFC6ETjnroGHyJPW33sO3Qd9ne/AMauh/D7d1FVPMjhJ50zCyzvCcm19c0pPYjja333TCjC7jgsf3ctm4Ov36nj83toxxd7uTao0pZVuKkyGXGJKc/lcd3gL3tv8Af6gYk8rOWsLTqBrLscwEQQmM00ETbwHo6Bp8nqvkzvB0Jh7WEioLTKM8/lQLXUiRJSUkzyyzTk2pwSc1paTJKMcrEhyakibTjPcT3XYT9vigXPrqf//nEQnQh+NW2Hl5u9OAwKawqd7KyzMWyUifz8mzkOcy4LAqKLAGCQLif0UATEjIF2SswK67YWQVdQ3+nofsRxgJtmBUHkmxC1yOoWgA9g/HGai7g3KOfRJEtqbtmmWVakpqQUqoEZyjCBC8ZPkgRvtE6yr+/0Mx9F87nmIos+rwRXmjw8JutPQwFophkiWK7iUKHGadFxmaWcVkUTLKEqusIHfKcZo6bm8Nx1bm4rArdQ6/S4X6JXOcCcp0LMCtOJElGFxoRdQz32E56PG8QCPfF7yPHWceZKx5OurdZZpkphy3CFNJFKCEQH4wI79zYxnMHPfz8Y3UcOycbAE0XHBwMcPfrHWxrH0PXBcR86HQhjOJBCBCG9UggYVYkLlxWzDdPL8Uie7GYc1EkM5JkSrmiQBcqgfAAL+66LF4aHbvg+1QWnJaSdpZZZsb/hghTxwfHfUrfV8OML6zxRssoEgKrMnEpRZZYWuLkgUsW8YNza1hV7iLXZorfltAFQhiC1HRQdR1/ROPFBjd7eqI4rGWYZHsGAWKUMELQ0P37uAAd1jLK809OTTjLLDNiOoGlkyzS8ZovKS4mQHGkDtxCaPhCXfQMv0nfyGbC0eHUJABs7hhjOBjFhESeI10wJlnigmVF/P6TS/jO2fO4cEUxNQV2LIohJF2AjvF/IQSBsEowqqWeJgldqLQPPEfrwHOAYVWtLv4oknREjzrLLCmk14LvlSPImQL32C52NP+QHc0/YkfzD9nTdg+jgaakVN6wxiuHPAQjGk6TTGnW5AYRiyJz/pJCbj6zmv88v447zqsjx25KEiCAJEvIGZoC4wih0TP0GvXdv48bg7PscynPP+WDcg6aZZbD5rBzphA6+zp/zeDYTsLRYYIRN51DG2kfWI+WMMC+s9vL1vZRhCaoKbBhNU1/KYdF4aiKLNbV5TMaVJMEqAmB06LgtGYeYhDo9A6/xZ72XxCKuAFQZAtzCs+OD2vMMsv7QVpzNVM9kSkuxvTKSCGsjuDx7k2KE0JjxH8onvmHAlGe3DPIwFgEhGBdbX5S+uloHPQT0fUEARp9xTl5NsqzrUlpBTpR1Udr/7NsbryZYGQgtkeiMPso5hVfiJyx7zjLLP8oEscZj6CNJktmTIozNRqTYkeWzYRUnUd39PNy4xAIQXm2lY8tK0xNPiWHBgNxjxpDgAJZgoVFDipzrAihEdX8jAVb6XS/xNsN/86Olh9D3DNGItc5n6VVn8dizkk48yyzvEemqNGmI63GjHHYIjQrLioLz0ryPDErLopz1hDSsrnv7S5+t6UbdIFZkvjsceU4zId3mdahIAjD28awIglsJpl5BQ4gTMvA0+xpu4ftzT9ge/OPcI/tipctsmyhomAdR9d8izzX4tRTzzLLh44jGicMRAZo6XuSbs9rSEjML7+KsDiWB7aNsrHBQ1TVkQWsW5DHnefWkucwp55iSm56uoG/7O43BCgEQghKs6389orlrCi34w22M+TdTXPfUwQj/Wh6BEWykOWYS03JxynJPRabuSD1tBBzo2seDjIWntrKmopZlllR4mAkpNI8HIrHmySJOTlW8uyZm7wC6PdF6PZG4hHZVhPz8qwZ3fUA/BGNvQMB3uwYo204gizD4kI7J83JYlGhA4uSfJwmBAfdQULq4fnIFthNzM2xIUkwGtJoGg7G99Xm2ci1ZX6mmaCLKN5gJ30jmxnxN6LpEZy2Mkpy1pLvWoLFlDWjakUXUbyBtphbooHNko/LVjXl8eHoMP5Qd0bvKQAkCZPiwGrKxWbOn9SdcTTQRCTqnYiY1mVNQpYV8l3LEvaPO9CMD0skbktHJkKDCSfs11tG+c4LLQz7jD6gLGBeoY3vn1/HivKslOOm5ytP1vPMvljfTgh0IVhWnsWGG1ZPMtpiYOxLfUXJBKM6X17fzJsdY6m7pqTAbmLL51bSPhrmWy+1sb3XB4CMxKePKuabJ1ZkFFWfL8JlTzTQ6zNEqEgSn1xeyG3r5qQmRROC5xtH+OaLLegYgh1/Pin2j0WW+N2F81lb6YoPGvsiGpc83kBzgohmwscXFXDn6XOwmmRebxvj+mcPxff95sI61s09/Ka8EDrusZ1sbbqDcGQQIUmxomgcCVmysHzuF6gruWTSzD+OL9TFa/u/mDSFrSzveNbU3orFNPn9dbpfZlfbTwmro6m7kpAQ2K2lrKn9DoXZR6X10F4/8CUGRndPRGQQYdLjIWE2Obhg9QZj17jQMviMipga09qJqhakx/Mm+zsfoKn3cfpHthGKDKVeCZAYDqj8cnMPX3iyIS5ASUBpjoWvnjLniARIzEoKEwLUgTm5tvSHR0r6bzoBjiPpAkk7/AAwJ9vKlcsKybcoSJpAaDpP7B7ghQYPqbO0Iprg3re76RsNxc9xbLmTW0+tSkqnC8Ehd5Ar/1jPN55vQoxfUxfIsTB+z9GoznVPNvDV51roHa9dAUnT0+532pBY/oqUfakPMwPC0WH2tP+CNw/eRCg6iJDIkG8Eugizq/UeXtpzNR5f/ZSzXPpHtxKKjuc/I4z6m/H46lOTJjFx1YnjMgUBBMJ9bDr4TQ50/iapxiXWckpML2U4R2qYeo5QOmkibBv8G/s67qd/ZAt72+/jrYM30dDzMLqeXK33eiPcs6mLezd1IcfcziQB2TaFm9bN5ayFmZuDM6HIaY4LcPwdFLsmH2c8XCQhkHUdWddRdB27JHApTBkcsSagJMF5C/K5enkhptg5AmGV327rod87MUSjCcHD2/t4cs+AISRNpybbwn+dMy/N7al5KMR3X25lT483Jjods9DJNUsszrdSl2vBJYMSu57QdF5v8vBW22j85058JlnX0+4/U7DKxvMQK74Sj59ZcTaBqoXY2/ErDvU9gS7G53xKmGQ7LlslOY4azIorXtNIEniD7TT0PJKQPhmBzqHeJ1KjCUT6cXt3o+kThdB0SJKCIlsTgiWp1tP0MI29f6TD/VLScclIKLIVk2JPCbbkINtSD5yStObo7rafUp53KrqI8G7z9wlHPFQVncPq2lviXie+iMZvtvbwyPY+QmEtLkBJgu9+pIZLVpUc9o+YyOM7e7np6YNGuSJA1wVfPmkOt32kLjXpYROManz16UNsah0BwGVVuG5NOUtL0y2+iVgUiRMSmmejIZUv/KWBXT1Gf0FC4pR5Odz3iYUossRLDR5u2dCCN2wUXg6zwo/Or+WsBcnDNVFN8Ok/1bO9e6J5nG0zcdnKYtbOyabAYUbVwROI8vxBNxvqPQgE5y4u4KZT5lCaZcEX0bj84X20eIzmqCJL3PPxBShTODYAlGZZWFDoQJbgjZZRbvjLRO3y60sWcUpNblL6yRFsb7mLtoFnMdothn9lZf4ZzCk8B4spB1k2EY6OMuJvpKnvcUJRD/muJRw975vkOhdmbMX0eN5g86GbM9aUOY5aTlx4V9r80nE63C+zu+2nhFXjdy7NPZ55xRckDFcJoqqPxt4/MRJojB9nMxdxzqrH4jN2Xt3/JdxjuwCwmvNYUnktLltlPD1MNDMNJCQUSnLXJuybujmq3H777bcnnIHCrJVk2auIqj66hjai6WEq8tdRlHNUPM2uHh93vdZBIDQhQAEcU5XFjafOndHA/FSMhFSe2NmHhCFAXUBNgY3zlhSnJj1sVF2w4YCbTk8ISUCWWeHqY0o5pSaX6jzbpKEqN7l0s5lkTq3N4/Htfaiq0RLoGA4x5I+wsNjJL97spMUdAB0UJL52ShUXLS9K8/h5dt8Af3i3DwRIAhTggUsX87GlhdQU2ClyWSjJslCdb+PE6hwK7GaKnWZuOXNe3OAVUQVP7upjxK8iCTBJ8IPz66jJt6c9R2IodJrjNWH7cIj1eweNwlTAR5cVMjfPnnSvk9HjeZP6rgfjNZokSRw979ssqvgUOY5aHNZi7JZCXLZK8rOW4rJWYTZlsab2Fpy2iowCBHi3+UcEIhMzYRKJREcpyF5Btr06dRcAo4EW+ke2oOmGEa0kZy11pZeS7agmyz6HLPscsp21VBWcQe/wprhYVT1AUfZRcaG1Da6Pz8axmfNYWH4VhdlH4bJVTRLm4LJVJNwJcREmx4z/kaFPaKxmJhGMDKDpESRJwWEri+/XhWB9/RDegAox51OBQJIEH11aiMOSdsrDpjLbBkKgxQQoSbCzx8twIHOz5XARukDXtXg4UttUkdPMPRcvwKYY59M0jQ0H3Nyy/hCbmj1omobQNU6szuL8JYVphpuoKvj23w6hjd+HrnHneTWsmZOdsSBzWBSuWl3K986tneg3x9BTnumwSXsnqQkyI4RO59BG1FhmB4m6ksuZU3h2xpXxZMlERcGpHFPz7zELaWaG/Q1JNZQi2yjMWhXfFui0DjwTr3mPBAkJiymbyvwzkuL94a6k7cMiU3mSKS6B9F86RlgdQwgVCTnJ3K/p8EbTsFFyx0QphCDbqjA3z55W0h8J5TlW7GbF6O9IRv+qwxPkTzt6UpMeNgJQhU5UF0R1gT+qsa1jlOcPDE4aNjYOxZuVqaysyOLCFSUICaK6YMAf4bWm4fj5s+0mrlhdRkkG39n6AR9qLF1UF8wrdPCxZUdW2yc+U1gTvFDvTnuOxPBGs8eYNhZDx7j/8TDTgskX6sAb6oi9WbBbiijLOwFFTvZsOjwE7QPr0cVEH7si/xRWVd+ISZ6onfuHt+ANtsW3jwxBMGp4eo0jS5nvXdVD9I++S9fQqynhtXjoG9lyWH1VphKh0KOGlUeSMCd4yHjDKgPesDElMSZAIQQWk4QpZfzqSLGYZFaUZ8f6hAJZCIIRjT09XryhzGI4HDRdoOo6qq4zEozyy7c6uPGp+knDrS8comc0feEpgCyriSuOLqWu0BE/53jQheDbZ9ZwWl1mt71n9w0kpb9mTdm0/bjJUBOeKaxqfOPpg2nPkRh++EoL0YTl74SYOH783mfCaKCZYLg/vp3nXESO47313X2hLjz+CaupIlsozllDjrOO4pxjJhJKEg09j8ULgKkwbJaGK+R40IVK2+B6ejxvJKXNdS5I2h4nHB1hf+dveKf5zqTwbkLY13EfaoqFdTomFaGcZD2ayBihqA668aMlhpGgSiByBM2gSTipJhchDDP6eG17sM9Le8z48F7QUjJcMKrhj0wdpsqUC4qc3Hp2DWbFWA1gPHx0aREXLp+8ZmsYDEykFzpVucbA+eFjNN0Tr+2PqGnPkBgCUT0p6wqMeZvjYYrHTULVAkmO++PWwvfCkHdfUg2X51xMYdZyJGQWlV+XNLbYO/x20goKk9E1tJG/77ueV/ZeOxH2XMfu9nsJqxNT8QqzVpDjqE06dgKBLqJoeniKEHnvQxTjWM25yLIp9gNPeIjkOozOfFyACFRgLKzyVsswUe3I2+iJLC5xIcdqW8OSpNM7FmbQl7lGmjHCqDWi2kSIjbBMGowBr8nVoQvBH3b04gurSed9em8/IXXygsmuSBPpVYF6hO9OAJquJ1079RlSQ2o+ESL5ncw4I0nSxDgHGHXOTBWcgajmw+3dnTBeJ5Flr8ZhLQfAaSsn2z4hElUL0DH0Snx7MiLqGKOBZkYDTfEwFmwhqk54w5hkOyvnfm1Kh39JUpAl05Rh8pxikLp/UhE6bZXIsuEs7Q/3xuMtikRtgR1iIlRjPp4IeGR7L2/HTP/vlaVlLpaXGR13o1kixSb1HllGTUToOrqmoWsadpPEp9aU8/2Pzp80fPvMeRn7dMQE+EqDm9cPDaGqxjnHQzAc5Zz7tzGQMH6YyKl1+Unpn947gHaEGVgXIn4eSejccV5d2nMkhq+dOhdzgqFIJByva1qaSCfDbinFapoYygiE+wml9LEOh0C4j97hTfFtmzmPyoLT4sIwm1xUF30kXhvqIkr/8NZJJ5bPBElSyHUsYHXtLZM2RQEspmwWln+SVdU3JoWVCWFRxaczTnCYiklF6LKV47JVoAuNEX9DPF6W4Jg5WUaTLrYEBUKgCcFYKMrXnjrIo+/2HLYfYyrlOVYuWFaMdbyfKQSBqM5oSDVK8veA0AVC1xG6jk2GsxcU8Om1lZOGK48uI38S/9d2T5Cfv9ZKl8eP0HVMEuTYlPj5mwd8PLi5M2ML4ZzFhfF0Qtd5Yns3Hv+RWYCFpsXPIwnBtWvSnyMxXLyiJLaq3fgJJt6J0PUZizDPuSDmx2kw7D/I4NjujGN7M6F/9B1CCYLShUr/yFbqu35HfdfvaOh+GI+/HomJJqk33MGQb198OxN2SxHF2UdTnL0aZ6xWTdy3pvYWKgtOm9KNzqw4qcw/jZqSj6eEi+KhqvDMaY1Sqa92UhHKkoWqgrPRhcqw7wC+kGG2lSWJ4+bmgCTFBGj0sYyOrqDfG+Z7G5r4tycPsLvHm3bBmWJRZM5ZXMSCIifEaltdF3R7ghkz9OEgiZgbWCwcKUII7ljfwNYWT/xcS4udfOO0eRTYTEi6IBrReGxLJ681ptcO+Q4Lp8/Pjx8biah89uFdUxYyvrBGiztDx1/X4+eR9SN7P8nvZIqbSMBiyibPtSieeTU9TEPPI/jD3alJ40Q1H2PB1tRoAFr7n0m6dkQdo7H3j+zvejAeOt0vo4sJC2QoMoTbuyep25RKUfbRHDXv/3FM7bdZVf31FIt/mGB0MCn9B8mkIgSoLj4fh6WYYd9BuodeRQijf7Ow2MnKcsOjQE0Q4HjfaiSo8szefs7/9Tuc/LPN7O09PGfpcRYWuzh3aXG8xJaF4NCgj8j/igh1JF03Mu9UuX4K/rann+d398bPZZMlnvniWq4/YS6n1uXHz98/GuQ7Tx+gwxNIOl6W4NdXrETStPg5Nje7+dgvNuPxp5u593WPccpdb3Lh/VvZ0prwTQ5hvJuJZzL60YeDBPHjpcOoCQGWVH4mKVP7Qp28sue62NBFMsHIIO82fZ+Nez5Dhzv5eyN9I9vwBtOPMRgvGDLdmKB/ZAvByORCMitOnNZynNZySnOPY0HZJ+OGx3B0mMaePxJIsPJ+kKS5raXSN7yFrYduRRdRls/9CmV5J+CwlNI9GuG/Xm2jvs9LRDWaiWMhDV9YNYZPYzPjRcwPMcuicOXqCj65uoIlZVnJTaEpGPJHOOcXW2lz+xG64KjKbB7//BoKnJn7aNMRiGh85qHtvHrQ+MFMskRVvp0sW+bm5jh5DjNPfPFYiGWDfV1jnPuzTXEzv8Oi8Mj1azhpvpEZx0JRLrl/K7s7J7z4P3dyNXd+fEmS76gA/razl288sYexhOEXi0nmoytKufiocrxhlT9s7eStpomxvap8Oz+5dDmnLizCF1Y572dv0dhvzOyQgKUV2dOO2Z69tJivnVWHRZHZWD/IJx/YFt83r8BBln3qd/L7Tx9DRb4xbjfqb+KN+hsJqxOFg4RMnmsRNSUXYTHl0OPZRIf7xXgtJkkSy6u+TF3ZZUiSwsY9n04aoHfZKpCnaNoFwv1JwwFr677LnMJzIIPbWm3JxYbRRTaeKRDuZUfrXfSPbI0ZoWQWV17LovJrkxaITnRbkyUTLlslipJyT4kSkgx/2VOX3BfblbreqPGbx7elGUxl0kWUhu5HOdT7J6Kqj2zHPOaVXIjDWkquYyFmUxEjwSgH+nwc6PfR7gkS0QRRVaNtKMD2zlFCkXH3NkG+3cSt5y3kijWVWDJ4hWTilfpBrnpoO5qmU5Zj45UbT6QkZZmLmRKIqFz/4Lu8djC9eTgVhS4Le75/NgCtg36+/PAOdnUYAjPJEtecNJfbLlyS5Omys2OEK+7bEh/blCX42ZUrueTY5FkUvpDKH7Z0cO/LTQzFpjxNR1W+nTsuXsaZS4sJRjTO/+9NHIqJcKZcuqaS/7p8BVazzMb6Aa751YQIZ8Km76yjpnh8VXTo9rzOga4H0xb9mgwJmYXlV7Ow/Gq8oQ5e2/+F+Pw/s+Jk3dJfp/lpJrK3436a+iYcvEty1nLy4p8C0rQiJNb/fLfpzvhgvc1cwOraWyjNNQpbUkRIrOBII0lBEiaTgwtXv2jsEobkpvIdnVYFsmSmtuRiFld8Gqs5l7FAC3va7mFn84/Z3vx9drXeSXv/T8iSHuC4sj9xxfIXuGHtbv7jdI27P17H/Zct47vnLjCmIgnBiD/Kd5+t56+H4f1y2sJCrllr/BhD3jCDk1gbZ4pJgFnXDyuYYn3HQFjjz1s6aOoai+87fWEhXz69Ns3VbNWcXL7zsUWYYukUTeeOJ/excV9ys8dlM3HNCXP5yeUrWFTkSLt2alg3v4C7r1jJGUsmmuqKLtLSTReUhPJXOoJ3kkp53kkcU/MtyvNOntLAAZDrqGN17c0sqvgUZpOLtoH16LHuDkB5/qm4bBUosmXSUFd2aZJ3y8DYdsYCmfuamSjOWc2C8qvi26HoEHs77n9PltYjYdqacBxNjxCMDBBRxwhHhhjy7ad/dBuj/sb4WJ4xXiTF1qGxY1Zc2CyFLK78CkOBSu547iAb6weQBZxYV8B9V6+iNGdmA7stgwE+/8hOdneN8LXTa7nlo4tSk8yIcFTnv5+rZ3f74b3obLuZB244ln0dI/zs+YP4YrVbrsPC9WfWcUxNfsZ+WDCi8eibrbyy13BIB1hTW8CXzlmAPcX/UwgYHAtxsGeM325sZnPjIGqsuWszK5x7VBlXnzKP6mIXeQ5LfHguGNG4+Q+76R1J7nNOxymLi/ncGXWYTTI7Wz38+JkDqUmm5KfXHkNZmpO3IKJ6CUb6ae5/ivbBF+KD+RIS+a5lLCi/knzXUuyWQkAiFPWwv/MBxhIG6BdXXBerkTK91Ql2tN7FaKA5vl2RdzILyq+if3Qbh3qfIKoZrYOK/FOpK700bQxQ0yPs6fgFI/6JZnBZ7vEsqrgWgB3N/8VIsCW+L3NNmCghCZNs5aTFP43tmr4mnJEIVS3IiL+RXs8byIqVuUXnYrcUo8hWBBpR1c9ooJGm3j/j8R1A08Komj8+4CtJCnOLzqOi8AauffAAuztGqMy1cdflKzht8eQeJYnoQvDnd7u5+a/7KXKa2XTzaWkO0f/XiGo6EVVHRsJskjAlrGL+z4IuNGN2hRBIkgkloTn4z0CqPDKJMDmNlNQ+nYkI06YypRKMDLKn/ed0DL6ALlTC0SHaBtYTjAyS51qEIttQZCtOazlVhWdRU/JxCrKXxz70GSGqehHojAVayXZkc9KCY3lyWw9mWeKUhUUsKJ3ckz4RSZKYV+ggENZ4o8FNXZGTRWXGty3+r6LIEhaTjNkkI/+TFjiSJBueJLIZeZom6oeRNNFlWt4iiUx7p57KNK0ID3Q+gC/Uyarqr1NbegmVBadjtxTT6X4ZiymLHEdN0oVl2YzTVkFZ3onkuhZgNrkY9tUj0JBlMyvnnMq25gAj3jBnLStl/gxFSMxiuLgsG7c3zN929HLSgkLyj9BK+s9OMDJI3/DbOGItklk+IGYgwkThjv+d4tmXsD1NczSijvHizstZUf015hadExebLqIc6HyQQLiXNXW3TdkJV7UA3Z7X2NnyEyryT2XlvJt49C03v3utmbuuXMXxCw5vTVIAtzfMf29oJBTW+M5Fiylw/WtlwnB0hLcavoUv1Mm6pfdPOrH1H8mLjR42NHjItilctqKYpSWGK1eLJ8TDO/oYDarcdX4NJlmmbTjEH3b2M+iPcvtZ1eTYTLzaPMKzB9yEVJ2KbCtXriqmtsDOqy0jPLs/3bJd4DTzubVl3P1GV9yZQwJKsix8dm0ZhQkeT4GIxp/3DrKrx0d5toX/d+rEolt7+vw89E4vdYV2rj2mFJdFQReCTa2jPLVvkI8sLuTsury4iP68d5DN7SPk2Ex8dk05FdkWQ2EJshpvdk7ESfEmqxDTDNaHo8PoIkK2fU5ybSeZcVhLiajTD8KbFAdVhWexbO4XKc5dg8XkoiLXRlm2jXnFh+djN05hlpVbL1xCcbaF2/+yF88Mzfr/HAjC0TGa+55ke8tdtA48x+DoDv6+93M09jyGpodpH3yeIe8eIuoIvmAHL+66ilf3f5EdrXfFB5wHRt/lhZ2f4Klt63hq2xlsOXRL0louEdXLjpYf8/zOi3h591UIBMO+g+xu+zndnlfj6Zr7nuTlPdfw8p5r8If76HS/EjPZT1p2A/DwO71sqHfzxM5+3ukYQ4tZl4cDUV5t9LCh3h1fGGskGOWN5mE21LsJRnWePeDmW+ubeLHezetNHh7b3svn/nyQPm+EtqEgLx5082K9mw2x8OJBN5uahvGHNV48GIurd7PhoJvfb+vhmj8c4ED/xHjicFDlTzv72VDv5qFtPfSOTeSfAW+EDfVutrWPEh53vRTQPhxkQ72bpkF//MmH/FHW7xtkwwE3z+8fZGvbkflNTylCu6UIWbYxEmhM8qrX9DC+YCdWc8EkbWCDqOajbeBvHOx6iBxHHRUFpwMSiiSxsCybktxUy9rMsVsUbjpvEWcvL+POJ/fydsMg/pA6Tdb4cBOI9LOj5Sc8v/MiDnQ/xJB3Jztaf8Tr9V/F498Psf5Vy8BT8WbO243fxhtqZci7m/7Rrah6gK6hjbx58OuoeohsRy0OS2F8DG98JvpIoJHWwecIRoZYWf11guF+NjV8k0N9f6Jt8AUA/KFuujx/j80+aGbDzk+wtek2Xtv/ZQLxzw2k0+YJ0jEUAM1YSGt/jxff+DQ3IUDTQE1wEhex2eKqRiCisadrDK8vzFVHlfDkp5Zzdl0eeRaZdk+Qi5cX8fxnV/HlEyqwy+BSJJ799Ap+e/kiYwkSVaPEYeL2s6p58NLFzMux0j7oZ/3+wXhBcLDfT7vbjwUBqs7fxpfXBGMVd1VDpHpl6SIWP5HD9vf6aB8KkGWS8AaivNMxOuVXw9L6lzGmFKFJcVBb8nFa+59jYGQbmh5B1YK0D77AkG8fFfmnTnpigP6RbYTVYcryT6Fv5O24b18wqnLm8ve2GBSxPuLHjqngPy9fSXmenbFgdLoC+kNLVPOzv/MBWgaexmLK5qjqmzhu/n+iyDZAx2WrIN+1BElSKMo6GkW2GR4lktHMMpuyWFR+Df5QN9uavofVlMOyqhs4fv5/UpR9jPHpANWLiK2aV9/1EEJolOSsJde5gLbB5wlHh7GacllS+RmE0BkY28mQ13CMznctozT3BMPVSxLo2uStj+f2DTDkC7GgyE5NgY2NDYN0jxi/vRACVdWIJkzxEkKgakacHHN+UDWN5kEfDf0+vnBiJb+8dDEry13k2ExU59vIs5uMGR+6xtw8O5U5NmM+p6qhoFNTaOf46hxqCqxEVZVgxPjAEMCftvdgkQTHV+dglgTP7OmPr5wghOFooqXMJNF1I17Exkcjqs6u7jH6RoJcsrIYpwn2944Zq8dPS2KVNoPvE9aVXUq+ayl72u9l66HvsKXxZpr7/kJlwTqKco6esiY0KQ78oR6GfQcRQp/IMIp8RH3ByXDaTFQXuyjLs6dZof5Z6Pa8To/HmMKzcu5Xqchfh8NaFvdvLMxaSZ7TWNbfH+5hZfXXWFh+dXzaTL5rCWV5J8WWHFTJccxnTsHZtA6sp8NteG+MMzi2k8GxXSiyjTmFZyNJMo29fwQEVYVnkWWbi6aHaO7/K7qI4rJVsbrmP6gt/US8/28yZe5KeMMq+3q8+EMqXzm5inMXF+LxR3i33fAu0mOZPJIkQuJxVrPMOYsKmF/oYGODm++uP8Rt6xt5dm9/Uvmq6zqRFDEDRFSNnpEQP93Yypce388bh4bIssisrsrBpEj0eyO81eKhOt/GdWvLcVlkOoYD7Ow0ula6LoioGmrKLCBNCCKaFq9N3f4om1uGQeh8YlUZx1bn0Njnp77XZ3x5OpUMUeNMK0KLKYflc7/I2vm3M7fwPGpLP8HxC39EbemlScteZKIkZzVzi87DrGQxv/TyePoTFxZjNU9uzPlXQ9WDeHwHiGpeXNZyKvLXIUky+zsfRNWD2MwFzC06D0W24PbuxR/uYV7RRxkNtBBVRzErLo6Z9y3cY7sZDTQjSQrLqj6PotgY9h9E1Y3SWZYtSLKJna13AzqlucdSmnsc25t/jKr5jS8a552ESbEzOLYrPoVtxZwvk+2oRtWCCKGS71qOxZSNLlSimi9p2tK77SO82zaMFlU5cV4etQV27DL84tWW+KwbXdXQoxN+skKIeJwUW7fn0U+t5NFPreSoChfbmof44QuNvHlowi9V6AI9qqGnNP/0qEogGGFL8xDP7e4lFIpy7yVLOGtRARLwyNZOxnxhqnNtrKrI5uiKLMZ8YV48MBCbgCDQo2psTmVSVRiL1wFB32iI7W0ejq7IojTLwgVLiwkEI7zVPEQwku5NNBXTipDYSldGn+40yvJOwmWrTPM8yIQkmSjIWkFV4RnYrROD8lmTfLfhX5WxQAvdnleNtUuX3IskyfhC3bi9uxBCw2Wvoij7aASCd5ruYGnVDfSNbKHT/TICwZLKz+KwljLsbyAcHUFCjk9OtZnzAOO7C05LOe6xvQQivSiyhTznIqKaH7fXWOY937WEgqyV6HqE7S0/NGrGgjMpyFqBpkeo734IkKgrvRhiMxea+56KP4cuBB3uAIPDAYSqsfS2V/jc73cw5gvTNeTnYK+XLKtCvs2Ermrs6x7D7Q2zr2sUz2gIMwJFgjcah3h8Wxcuk8zPL13GdWsrCIai7OyYMHwIXUdXVfSUmlCPalRkWfj66fOYm2vFF4igqjpmRSai6qzf2Yuuavz1nU4W3/oyz2zvJhpRqe8epXs4aIhb1dBVjaiuo2qx5VV03bhWbCW75/f24g9GeLNhgGXffYUb/mcnuqrxev0Aw4HJm+qZmJEIZ3l/iao+wlEPVnMuNkshUc1HY89jDPvrAYlllZ8HYMi7F6s5j3zXEro9rxNWR8h3LWZ+2WWEox58oc54u2d8oeYcRx2SJGFWXKh6gD3tP0PVQtgtxZTnn8L+zt8SVj0xUS5AkS20uV8gGBnCrLgoyT0OqzmHtoH1jAaasZhyjDl+PX+k2/M6FfmnxK817I/y6v5+9IjKuUuKuGhlKRevKmVZiROzrvHga63MybdzSm0eNgTXP/guX3p4B/e+2IjPH+K646rIcZip7x7l7hcO8tVHd/Lg6y1saXRjQ7CyYmJMWRYCRdORNS2prTcet3pOLucuLsKkadz70iEGx8Jsbhqi2+0jzyxx4cpSLlpZyieOKqXMYaK1d4z93aOgCxRVo38owGNvdfDb11vY1T6KFIuXdEE4qvPSrl4KrDJnLSjkohWlXLCimOWlDtzDQTY1JButDLtJcnt0fLRRmokD9yzvP0Y3XcKsZKHrURp6HqVz6BVAUJR9NAXZK3CP7aKl7ymWVl2PIlvojC3XXllwBv5QD4d6HycQ7o31IQW+YBcDo+8Ya3MKnaqCM9GFhqpHAEE4OsLejl/SN7I53l+3W4roGd5EQ/ejSBI4rCXYzQU09f2FvZ33o8hmLOYchrz7EMDiys8kfQXZH1LpHPCxek4O3794KXdfsYK7r1jBF9fNoybPwd72YVRd8Mnjqrj+5GrsssTulmHybCa+cnotXz/bmFZ13ooyrj9lHmg6v3zpEJGIypdOq+H42ok5iw6zQonTTInTnGSVKHWZKXaYsZlkrjlhDktKXHjGQmxqGGR7yxD5NhNnLy7mv2P3dvcVK7hsdQUWAW39PmSgzGUhElZ5/O12fvdqCzvbPTjNCmUuCy6rwp6OESJhlXV1hdx58VJ+csUKfnLFSj538jyqc228fiDzvESRYiEdl+WUg/WzfDD0j2zjzYM3IksmnLZKAuE+ND2EJEmcsex39Hg2MexvYEH5lRRmrSQYGeT5HReDJLCZ87GYclhUcS1ZtjlsbbodX6gTp7UUTQ8TVkeYV3wBK+b+GxIKWw/dRs+wscTf+HhvINyLQMdqzkcIjUh0BIFAkS1YTXlENC+aHuLoef9OUfbRmGQbFnNO3NA2TlTT6RkOYjUpFGdb4652gYjGkDeMAMrz7JhkCX9YZcgbIarp2MwKBVkWbAl2gkBYZcgXIRzVsVlkClzWJId3b0hl2BdBkqCywBEXYofbjyLLFGZZsJoVuoeDqJpOtt2Mpgv8IRWX3ZTk4DEaiDLij5BlN2MxyQylzNLJcVqQEXh8EXKdFhRZwuOL4LCayHcZ20II45l8EWQJKgucGQfspfG/x0U5K8IPBxF1lD3t99I19CqybEGWzPHFkhTZRq6jjjV1t8Xn1o3Xlo29fyDLXs3qmv8g21EDseXftx36HoFID7JkZn7ZZSys+FTcyto7vIk9bfdhteSypPKzFGQtZ1P9jQwHDmE15aILlWBkALPiJN+1hCHvPqzmPI6bf+e/9EdXk2SSwXUtTUaZvGYmceSeFeGHBFULMhI4RFTz81b9N5BlE3nOJSyq+BSlucfF+13j6EJF1QKYFWdGt8FQdAiTbM+4FH0qRinew+DYdna33YOqBzl+wY8oyV1DMDyIw1qEkrDy9b8i04mQ1DQJrmnjxCrDhHRGmtk+4YcAXagM+w/S2v8M7zTdARLku5azuvZmyvJOSBMgsaUWLKbsjAIkNkt8JgIk1k+xmnPoHd6MqgcpzT2esrwTMMl2suxz/uUFmMYRV1upq7kaW+m/7iwfKAJB68CzvNv8A0b8jUTUUWTJQknOGlz2yZd2+N/GF+yif2QzsmRmYfnVMxqC+tdlJiqcPE2qcWZWhP9gGnoeY1frTynMWh7/Tl+Oo4a6skvTPt38frK99QdoIkJNycXkOY9s1YJZUsjkvpXadfxAf+VZ0nB7d7Ov41dUF5/PgvJPMhpoQkKipviiab2R/jcRCILhIeyWYopzjsGkzDY/pyNTPTeVHzXx/elHzorwH4RAp77rIVy2SpZUfpbWgecYC7Ywt+gjzCu5IDX5+4qExMq5/8ayqi9QkrMmdfcsMQEliSxdS+lMkkYkCVbMWkf/UQih8fd9n0fV/RTnrKVr6O/kOReztu5WLKb/28t2/DOTaNnMVPGlyWkGQxWzNeE/CElSWFhxDf5QP+2Dz1OSs4ZV1TfOCvCfhiOru8abpIm14WxNOMssh8F044XpckrvB4rYgKEU+3u2JpxlliMlVW8ZjTNJqzolRY8f/v8B5l6uzlxwbFcAAAAASUVORK5CYII=";
+
+// Extra Service master options (from Excel Care Group operations spec)
+const EXTRA_SERVICE_TYPES = ["Additional Community Access","Additional SIL Support","Sleepover","Active Night","Transport","Medical Appointment","Shopping Assistance","Remote Community Trip","Overnight Trip","Other"];
+// Billing is derived automatically from the chosen Service Type so staff never
+// have to pick a Funding Type, Ratio, or NDIS Line Item by hand. Adjust these
+// mappings centrally if a service's billing configuration changes.
+const EXTRA_SERVICE_CONFIG = {
+  "Additional Community Access": { lineItem:"1:1 Community Access", ratio:"1:1", fundingType:"Community Participation", billingType:"" },
+  "Additional SIL Support":      { lineItem:"1:1 SIL",              ratio:"1:1", fundingType:"Daily Living",             billingType:"" },
+  "Sleepover":                   { lineItem:"Other",                ratio:"1:2", fundingType:"Daily Living",             billingType:"Additional Billable Sleepover" },
+  "Active Night":                { lineItem:"Other",                ratio:"1:2", fundingType:"Daily Living",             billingType:"Additional Billable Active Night" },
+  "Transport":                   { lineItem:"Transport",            ratio:"1:1", fundingType:"Transport",                billingType:"" },
+  "Medical Appointment":         { lineItem:"Transport",            ratio:"1:1", fundingType:"Core Supports",            billingType:"" },
+  "Shopping Assistance":         { lineItem:"1:1 Community Access", ratio:"1:1", fundingType:"Community Participation", billingType:"" },
+  "Remote Community Trip":       { lineItem:"Transport",            ratio:"1:1", fundingType:"Transport",                billingType:"" },
+  "Overnight Trip":              { lineItem:"Other",                ratio:"1:1", fundingType:"Daily Living",             billingType:"" },
+  "Other":                       { lineItem:"Other",                ratio:"1:1", fundingType:"Other",                    billingType:"" },
+};
+
+
+
+// Each roster entry is a shift block: { id, serviceType, days:[...], startTime, finishTime, ratio, label }
+const SEED_ROSTERS = {
+  p1: [
+    { id:"s1", serviceType:"SIL", days:[...WD_SUN], startTime:"06:00", finishTime:"11:00", ratio:"1:1", label:"" },
+    { id:"s2", serviceType:"SIL", days:[...WD_SUN], startTime:"11:00", finishTime:"17:00", ratio:"1:2", label:"" },
+    { id:"s3", serviceType:"SIL", days:[...WD_SUN], startTime:"20:00", finishTime:"22:00", ratio:"1:1", label:"" },
+    { id:"s4", serviceType:"SIL", days:[...WD_SUN], startTime:"22:00", finishTime:"06:00", ratio:"1:2", label:"Active Night" },
+    { id:"s5", serviceType:"SIL", days:["Saturday"], startTime:"06:00", finishTime:"14:00", ratio:"1:1", label:"" },
+    { id:"s6", serviceType:"SIL", days:["Saturday"], startTime:"14:00", finishTime:"17:00", ratio:"1:1", label:"" },
+    { id:"s7", serviceType:"SIL", days:["Saturday"], startTime:"20:00", finishTime:"22:00", ratio:"1:1", label:"" },
+    { id:"s8", serviceType:"SIL", days:["Saturday"], startTime:"22:00", finishTime:"06:00", ratio:"1:2", label:"Active Night" },
+  ],
+  p2: [ { id:"s1", serviceType:"SIL", days:["Monday"], startTime:"", finishTime:"", ratio:"1:1", label:"" },
+        { id:"s2", serviceType:"Community Support", days:["Wednesday"], startTime:"", finishTime:"", ratio:"1:1", label:"" },
+        { id:"s3", serviceType:"Shopping", days:["Friday"], startTime:"", finishTime:"", ratio:"1:1", label:"" } ],
+  p3: [ { id:"s1", serviceType:"Community Access", days:["Tuesday"], startTime:"", finishTime:"", ratio:"1:1", label:"" },
+        { id:"s2", serviceType:"Dialysis Transport", days:["Thursday"], startTime:"", finishTime:"", ratio:"1:1", label:"" },
+        { id:"s3", serviceType:"Social Support", days:["Saturday"], startTime:"", finishTime:"", ratio:"1:1", label:"" } ],
+  p4: [ { id:"s1", serviceType:"Domestic Assistance", days:["Monday"], startTime:"", finishTime:"", ratio:"1:1", label:"" },
+        { id:"s2", serviceType:"Community Support", days:["Wednesday"], startTime:"", finishTime:"", ratio:"1:1", label:"" } ],
+  p5: [ { id:"s1", serviceType:"Personal Care", days:["Tuesday"], startTime:"", finishTime:"", ratio:"1:1", label:"" },
+        { id:"s2", serviceType:"Community Access", days:["Thursday"], startTime:"", finishTime:"", ratio:"1:1", label:"" },
+        { id:"s3", serviceType:"Shopping", days:["Friday"], startTime:"", finishTime:"", ratio:"1:1", label:"" } ],
+  p6: [ { id:"s1", serviceType:"SIL", days:["Monday"], startTime:"", finishTime:"", ratio:"1:1", label:"" },
+        { id:"s2", serviceType:"Community Access", days:["Monday"], startTime:"", finishTime:"", ratio:"1:1", label:"" },
+        { id:"s3", serviceType:"Family visit support", days:["Sunday"], startTime:"", finishTime:"", ratio:"1:1", label:"" } ],
+  p7: [ { id:"s1", serviceType:"Dialysis Transport", days:["Wednesday"], startTime:"", finishTime:"", ratio:"1:1", label:"" } ],
+};
+function normalizeRosters(raw){
+  if(!raw) return null;
+  const firstVal = Object.values(raw)[0];
+  if(firstVal !== undefined && !Array.isArray(firstVal)) return null; // legacy (old day-tag) format — reseed
+  return raw;
+}
+
+/* ---------------------------------------------------------
+   Storage (localStorage — used for rosters/logs, kept local.
+   Houses/participants/staff now live in Supabase — see below —
+   so the same data reaches the Night Support Monitoring app
+   on any device, not just this browser.)
+--------------------------------------------------------- */
+function loadKey(key, fallback){
+  try{ const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }
+  catch(e){ return fallback; }
+}
+function saveKey(key, value){
+  try{ localStorage.setItem(key, JSON.stringify(value)); }catch(e){ console.error("storage error", e); }
+}
+function uid(){ return "id-"+Date.now()+"-"+Math.random().toString(16).slice(2); }
+function todayStr(){
+  const d = new Date();
+  return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+}
+function fmtDate(s){ if(!s) return ""; const [y,m,d]=s.split("-"); return `${d}/${m}/${y}`; }
+function esc(s){ return (s??"").toString().replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+/* ---------------------------------------------------------
+   Cloud sync — Supabase (houses / staff / participants).
+   Rosters and service logs stay on this device (localStorage);
+   only the data the Night Support app needs to share across
+   phones lives in the cloud.
+--------------------------------------------------------- */
+const SUPABASE_URL = "https://lxcfabnjphnqgjvzghjm.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_TTQkbq7bgCQM6QLzT2W81Q_HSgAgAoY";
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+let cloudSyncStatus = "loading"; // 'loading' | 'ready' | 'error'
+let cloudSyncError = null;
+
+async function bootCloudData(){
+  try{
+    const [housesRes, staffRes, partsRes] = await Promise.all([
+      sb.from("houses").select("*"),
+      sb.from("staff").select("*"),
+      sb.from("participants").select("*"),
+    ]);
+    if(housesRes.error) throw housesRes.error;
+    if(staffRes.error) throw staffRes.error;
+    if(partsRes.error) throw partsRes.error;
+
+    // Merge local data into Supabase every boot (not just when a table is fully
+    // empty): any house/staff/participant that exists on this device but not yet
+    // in the cloud gets pushed up via upsert. This is what actually fixes a
+    // participant "reverting" to Unassigned — previously a participant that was
+    // never migrated would silently fail every .update() (0 rows matched, no
+    // error) because the row didn't exist in Supabase at all.
+    const cloudHouseIds = new Set(housesRes.data.map(h=>h.id));
+    const missingHouses = state.houses.filter(h=>!cloudHouseIds.has(h.id));
+    if(missingHouses.length){
+      await sb.from("houses").upsert(missingHouses.map(h=>({ id:h.id, name:h.name, pin:h.pin||"" })));
+    }
+    const cloudStaffIds = new Set(staffRes.data.map(s=>s.id));
+    const missingStaff = state.staff.filter(s=>!cloudStaffIds.has(s.id));
+    if(missingStaff.length){
+      await sb.from("staff").upsert(missingStaff.map(s=>({ id:s.id, name:s.name })));
+    }
+    const cloudPartIds = new Set(partsRes.data.map(p=>p.id));
+    const missingParts = state.participants.filter(p=>!cloudPartIds.has(p.id));
+    if(missingParts.length){
+      await sb.from("participants").upsert(missingParts.map(p=>({ id:p.id, name:p.name, house_id:p.houseId||null, active:p.active })));
+    }
+
+    // Re-fetch so state reflects exactly what's in Supabase now (including the
+    // rows we just upserted above).
+    const [housesFinal, staffFinal, partsFinal] = await Promise.all([
+      missingHouses.length ? sb.from("houses").select("*") : housesRes,
+      missingStaff.length ? sb.from("staff").select("*") : staffRes,
+      missingParts.length ? sb.from("participants").select("*") : partsRes,
+    ]);
+    state.houses = (housesFinal.data||[]).map(h=>({ id:h.id, name:h.name, pin:h.pin||"" }));
+    state.staff = (staffFinal.data||[]).map(s=>({ id:s.id, name:s.name }));
+    state.participants = (partsFinal.data||[]).map(p=>({ id:p.id, name:p.name, houseId:p.house_id, active:p.active }));
+
+    saveKey("ndis-houses", state.houses);
+    saveKey("ndis-staff", state.staff);
+    saveKey("ndis-participants", state.participants);
+    cloudSyncStatus = "ready";
+  }catch(e){
+    console.error("Supabase load failed", e);
+    cloudSyncStatus = "error";
+    cloudSyncError = e.message || "Could not reach the cloud database.";
+  }
+  render();
+  subscribeCloudRealtime();
+}
+let cloudChannel = null;
+function subscribeCloudRealtime(){
+  if(cloudChannel) return;
+  cloudChannel = sb.channel("roster-app-live")
+    .on("postgres_changes", { event:"*", schema:"public", table:"houses" }, ()=>{
+      sb.from("houses").select("*").then(({data})=>{ if(data){ state.houses=data.map(h=>({id:h.id,name:h.name,pin:h.pin||""})); saveKey("ndis-houses",state.houses); render(); } });
+    })
+    .on("postgres_changes", { event:"*", schema:"public", table:"staff" }, ()=>{
+      sb.from("staff").select("*").then(({data})=>{ if(data){ state.staff=data.map(s=>({id:s.id,name:s.name})); saveKey("ndis-staff",state.staff); render(); } });
+    })
+    .on("postgres_changes", { event:"*", schema:"public", table:"participants" }, ()=>{
+      sb.from("participants").select("*").then(({data})=>{ if(data){ state.participants=data.map(p=>({id:p.id,name:p.name,houseId:p.house_id,active:p.active})); saveKey("ndis-participants",state.participants); render(); } });
+    })
+    .subscribe();
+}
+
+/* ---------------------------------------------------------
+   State
+--------------------------------------------------------- */
+let state = {
+  role: "admin",           // 'admin' | 'finance'
+  tab: "dashboard",
+  participants: loadKey("ndis-participants", null) || SEED_PARTICIPANTS,
+  rosters: normalizeRosters(loadKey("ndis-rosters", null)) || SEED_ROSTERS,
+  logs: loadKey("ndis-logs", null) || [],
+  lineItems: loadKey("ndis-line-items", null) || DEFAULT_LINE_ITEMS,
+  houses: loadKey("ndis-houses", null) || [],
+  staff: loadKey("ndis-staff", null) || [],
+  rosterParticipantId: null,
+  modal: null,              // { type, participantId }
+  report: { type:"all", participant:"all", staff:"", from:"", to:"" },
+};
+if(!loadKey("ndis-participants", null)) saveKey("ndis-participants", state.participants);
+if(!loadKey("ndis-rosters", null)) saveKey("ndis-rosters", state.rosters);
+if(!loadKey("ndis-line-items", null)) saveKey("ndis-line-items", state.lineItems);
+if(!loadKey("ndis-staff", null)) saveKey("ndis-staff", state.staff = ["Priyanka","Sabithri","Ashni","Rajani"].map(name=>({ id: uid(), name })));
+state.rosterParticipantId = state.participants[0]?.id || null;
+
+function persist(key){ saveKey(key, state[key.replace("ndis-","").replace(/^./, m=>m)]); }
+function saveParticipants(){ saveKey("ndis-participants", state.participants); }
+function saveRosters(){ saveKey("ndis-rosters", state.rosters); }
+function saveLogs(){ saveKey("ndis-logs", state.logs); }
+function saveLineItems(){ saveKey("ndis-line-items", state.lineItems); }
+function saveHouses(){ saveKey("ndis-houses", state.houses); }
+function saveStaff(){ saveKey("ndis-staff", state.staff); }
+// Houses live in this shared master data (same localStorage origin as the standalone
+// Night Support Monitoring app), which is how that separate app finds out which
+// participants belong to which house, and whether a house phone needs a PIN.
+function houseSlug(house){ return house.name.toLowerCase().trim().replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,""); }
+function buildHouseLink(house){
+  // Resolved relative to this file's own location (works for file:// opens,
+  // any subfolder, and any domain — not just origin root) so it never
+  // produces an invalid file:///night-support-entry.html path.
+  return new URL(`night-support-entry.html?house=${houseSlug(house)}`, location.href).href;
+}
+
+function setState(patch){ Object.assign(state, patch); render(); }
+
+/* ---------------------------------------------------------
+   Derived helpers
+--------------------------------------------------------- */
+function today(){ return todayStr(); }
+function todayDay(){ return DAY_BY_INDEX[new Date().getDay()]; }
+function participantName(id){ return state.participants.find(p=>p.id===id)?.name || "Unknown"; }
+function scheduledToday(){
+  const d = todayDay();
+  return state.participants.filter(p => p.active && (state.rosters[p.id]||[]).some(shift => shift.days.includes(d)));
+}
+function shiftsToday(participantId){
+  const d = todayDay();
+  return (state.rosters[participantId]||[]).filter(shift => shift.days.includes(d));
+}
+// Picks which of today's shift blocks a "Service Completed" click refers to:
+// prefer the shift whose time window contains the current time (handles overnight
+// shifts too); fall back to whichever shift starts closest to now.
+function currentShiftForParticipant(participantId){
+  const shifts = shiftsToday(participantId);
+  if(shifts.length===0) return null;
+  const now = new Date();
+  const nowMins = now.getHours()*60 + now.getMinutes();
+  const toMins = t => { if(!t) return null; const [h,m]=t.split(":").map(Number); return h*60+m; };
+  for(const sh of shifts){
+    const s = toMins(sh.startTime), f = toMins(sh.finishTime);
+    if(s===null || f===null) continue;
+    const inWindow = s<=f ? (nowMins>=s && nowMins<f) : (nowMins>=s || nowMins<f); // s>f = overnight
+    if(inWindow) return sh;
+  }
+  return shifts.slice().sort((a,b)=>{
+    const da = Math.abs((toMins(a.startTime)??0) - nowMins);
+    const db = Math.abs((toMins(b.startTime)??0) - nowMins);
+    return da-db;
+  })[0];
+}
+// If a shift doesn't have an explicit NDIS line item saved, try to match one
+// from the central master list using the shift's service type + ratio.
+function deriveLineItem(serviceType, ratio){
+  if(!serviceType) return "";
+  const exact = state.lineItems.find(li => li.toLowerCase().includes(serviceType.toLowerCase()) && (!ratio || li.includes(ratio)));
+  if(exact) return exact;
+  const loose = state.lineItems.find(li => li.toLowerCase().includes(serviceType.toLowerCase()));
+  return loose || "";
+}
+function fmtTime(t){ return t || "—"; }
+function todayStatus(participantId){
+  const t = today();
+  const entries = state.logs.filter(l => l.participantId===participantId && l.date===t && (l.type==="completed"||l.type==="cancelled"));
+  return entries.length ? entries[entries.length-1] : null;
+}
+function staffSuggestions(){
+  const s = new Set(); state.logs.forEach(l=>{ if(l.staff) s.add(l.staff); }); return Array.from(s);
+}
+function todayStats(){
+  let completed=0, cancelled=0, pending=0;
+  scheduledToday().forEach(p=>{
+    const s = todayStatus(p.id);
+    if(s?.type==="completed") completed++;
+    else if(s?.type==="cancelled") cancelled++;
+    else pending++;
+  });
+  const t = today();
+  const extra = state.logs.filter(l=>l.type==="extra" && l.date===t).length;
+  const km = state.logs.filter(l=>l.type==="transport" && l.date===t).reduce((sum,l)=>sum+(Number(l.totalKm)||0),0);
+  const supported = new Set(state.logs.filter(l=>l.type==="completed" && l.date===t).map(l=>l.participantId)).size;
+  return { completed, cancelled, pending, extra, km, supported };
+}
+function reportRows(){
+  const r = state.report;
+  let rows = state.logs;
+  if(r.type!=="all") rows = rows.filter(l=>l.type===r.type);
+  if(r.participant!=="all") rows = rows.filter(l=>l.participantId===r.participant);
+  if(r.staff.trim()) rows = rows.filter(l=>(l.staff||"").toLowerCase().includes(r.staff.trim().toLowerCase()));
+  if(r.from) rows = rows.filter(l=>l.date>=r.from);
+  if(r.to) rows = rows.filter(l=>l.date<=r.to);
+  return rows.slice().sort((a,b)=> a.date<b.date?1:-1);
+}
+
+/* ---------------------------------------------------------
+   Badge / small render helpers
+--------------------------------------------------------- */
+function badge(tone, text){
+  const tones = { emerald:"bg-emerald-100 text-emerald-800", rose:"bg-rose-100 text-rose-800", amber:"bg-amber-100 text-amber-800", slate:"bg-slate-100 text-slate-600", teal:"bg-teal-100 text-teal-800" };
+  return `<span class="px-2 py-0.5 rounded-full text-xs font-medium ${tones[tone]}">${esc(text)}</span>`;
+}
+function statCard(label, value, icon, tone){
+  const tones = { teal:"text-teal-800 bg-teal-50 dark:bg-teal-900/40 dark:text-teal-300", emerald:"text-emerald-700 bg-emerald-50 dark:bg-emerald-900/40 dark:text-emerald-300", amber:"text-amber-700 bg-amber-50 dark:bg-amber-900/40 dark:text-amber-300", rose:"text-rose-700 bg-rose-50 dark:bg-rose-900/40 dark:text-rose-300", slate:"text-slate-700 bg-slate-100 dark:bg-slate-700 dark:text-slate-200", indigo:"text-indigo-700 bg-indigo-50 dark:bg-indigo-900/40 dark:text-indigo-300" };
+  return `<div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-4 flex items-center gap-3">
+    <div class="w-11 h-11 rounded-lg flex items-center justify-center shrink-0 ${tones[tone]}"><i data-lucide="${icon}" class="w-5 h-5"></i></div>
+    <div><div class="text-2xl font-semibold text-slate-800 dark:text-slate-100 leading-tight font-display">${value}</div><div class="text-xs text-slate-500 dark:text-slate-400">${esc(label)}</div></div>
+  </div>`;
+}
+function actionBtn(tone, icon, label, onclick){
+  const tones = { emerald:"bg-emerald-600 hover:bg-emerald-700", rose:"bg-rose-600 hover:bg-rose-700", amber:"bg-amber-600 hover:bg-amber-700", teal:"bg-teal-700 hover:bg-teal-800" };
+  return `<button onclick="${onclick}" class="${tones[tone]} text-white text-xs font-medium px-3 py-2 rounded-lg flex items-center gap-1.5"><i data-lucide="${icon}" class="w-3.5 h-3.5"></i>${esc(label)}</button>`;
+}
+function field(label, inner){ return `<label class="block mb-3"><span class="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">${esc(label)}</span>${inner}</label>`; }
+const inputCls = "w-full border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-600 focus:border-teal-600";
+
+/* ---------------------------------------------------------
+   Top bar + nav
+--------------------------------------------------------- */
+function renderTopbar(){
+  return `
+  <div class="bg-teal-800 text-white px-4 md:px-6 py-3 flex items-center gap-3 print-hidden">
+    <img src="${LOGO_B64}" alt="${esc(BRAND_NAME)} logo" class="h-9 w-auto bg-white rounded px-1.5 py-1" />
+    <div>
+      <div class="font-bold leading-tight font-display">${esc(BRAND_NAME)} — Roster of Care</div>
+      <div class="text-[11px] text-teal-200 leading-tight">${esc(BRAND_BRANCH)} · Service Tracking System</div>
+    </div>
+    <div class="ml-auto flex items-center gap-3">
+      <div class="text-xs text-teal-100 hidden sm:block">${new Date().toLocaleDateString("en-AU",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</div>
+      <button onclick="toggleDarkMode()" title="Toggle dark mode" class="bg-teal-700 hover:bg-teal-600 border border-teal-600 text-white rounded-lg p-2"><i data-lucide="${document.documentElement.classList.contains('dark')?'sun':'moon'}" class="w-4 h-4"></i></button>
+      <select onchange="setState({role:this.value, tab:'dashboard'})" class="bg-teal-700 border border-teal-600 text-white text-sm rounded-lg px-2 py-1.5 focus:outline-none">
+        <option value="admin" ${state.role==="admin"?"selected":""}>House Supervisor (Admin)</option>
+        <option value="finance" ${state.role==="finance"?"selected":""}>Finance User</option>
+      </select>
+    </div>
+  </div>
+  <div class="hidden print:flex items-center gap-3 px-2 py-3 border-b-2 border-teal-800 mb-3">
+    <img src="${LOGO_B64}" alt="${esc(BRAND_NAME)} logo" class="h-10 w-auto" />
+    <div>
+      <div class="font-bold text-slate-800 font-display">${esc(BRAND_NAME)} — ${esc(BRAND_BRANCH)}</div>
+      <div class="text-xs text-slate-500">Roster of Care & Service Tracking — printed ${new Date().toLocaleDateString("en-AU")}</div>
+    </div>
+  </div>`;
+}
+// Dark mode: persisted preference, defaults to system setting on first visit.
+function initDarkMode(){
+  const saved = localStorage.getItem("ndis-theme");
+  const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  if(saved === "dark" || (!saved && prefersDark)) document.documentElement.classList.add("dark");
+}
+function toggleDarkMode(){
+  const isDark = document.documentElement.classList.toggle("dark");
+  localStorage.setItem("ndis-theme", isDark ? "dark" : "light");
+  render();
+}
+initDarkMode();
+function renderNav(){
+  const NAV_ADMIN = [["dashboard","Dashboard","layout-dashboard"],["today","Today's Services","clipboard-list"],["participants","Participants","users"],["roster","Monthly Roster","calendar-days"],["reports","Reports","file-text"]];
+  const NAV_FINANCE = [["dashboard","Dashboard","layout-dashboard"],["today","Service Records","clipboard-list"],["reports","Reports & Export","file-text"]];
+  const nav = state.role==="admin" ? NAV_ADMIN : NAV_FINANCE;
+  return `<div class="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 px-2 md:px-6 flex gap-1 overflow-x-auto print-hidden">
+    ${nav.map(([id,label,icon])=>`
+      <button onclick="setState({tab:'${id}'})" class="flex items-center gap-1.5 px-3 py-3 text-sm font-medium border-b-2 whitespace-nowrap ${state.tab===id?"border-teal-700 text-teal-800":"border-transparent text-slate-500 hover:text-slate-800"}">
+        <i data-lucide="${icon}" class="w-4 h-4"></i>${esc(label)}
+      </button>`).join("")}
+  </div>`;
+}
+
+/* ---------------------------------------------------------
+   Dashboard
+--------------------------------------------------------- */
+function renderDashboard(){
+  const s = todayStats();
+  const sched = scheduledToday();
+  return `
+  <div>
+    <h1 class="text-xl font-bold mb-1 font-display">${state.role==="admin"?"Today's Overview":"Finance Overview"}</h1>
+    <p class="text-sm text-slate-500 mb-4">${todayDay()} — ${sched.length} participant${sched.length!==1?"s":""} scheduled today</p>
+
+    <a href="night-support-entry.html" target="_blank" rel="noopener"
+       class="flex items-center gap-4 bg-teal-800 hover:bg-teal-900 text-white rounded-xl shadow-sm p-4 mb-6 transition-colors">
+      <div class="w-11 h-11 rounded-lg bg-white/15 flex items-center justify-center shrink-0">
+        <i data-lucide="clipboard-edit" class="w-6 h-6"></i>
+      </div>
+      <div class="flex-1 min-w-0">
+        <div class="font-semibold">Open Staff Data Entry</div>
+        <div class="text-xs text-teal-100">Night support logs, interventions &amp; shift records — staff enter data here, no dashboard or settings access.</div>
+      </div>
+      <i data-lucide="external-link" class="w-5 h-5 opacity-80 shrink-0"></i>
+    </a>
+
+    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+      ${statCard("Completed", s.completed, "check", "emerald")}
+      ${statCard("Pending", s.pending, "clock", "amber")}
+      ${statCard("Cancelled", s.cancelled, "x", "rose")}
+      ${statCard("Extra Services", s.extra, "plus", "teal")}
+      ${statCard("Total Kilometres", s.km, "car", "slate")}
+      ${statCard("Participants Supported", s.supported, "users", "teal")}
+    </div>
+    <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-4">
+      <div class="text-sm font-semibold text-slate-700 mb-3">Week at a glance</div>
+      <div class="flex gap-2 flex-wrap">
+        ${WEEK_ORDER.map(d=>`<div class="px-3 py-2 rounded-lg text-xs font-medium border ${d===todayDay()?"bg-teal-800 text-white border-teal-800":"bg-slate-50 text-slate-500 border-slate-200"}">${d}</div>`).join("")}
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ---------------------------------------------------------
+   Today's Services
+--------------------------------------------------------- */
+function renderToday(){
+  const sched = scheduledToday();
+  const t = today();
+  const rows = sched.map(p=>{
+    const status = todayStatus(p.id);
+    const extras = state.logs.filter(l=>l.type==="extra" && l.participantId===p.id && l.date===t);
+    const transports = state.logs.filter(l=>l.type==="transport" && l.participantId===p.id && l.date===t);
+    const shifts = shiftsToday(p.id);
+    return `
+    <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-4">
+      <div class="flex flex-wrap items-center gap-3">
+        <i data-lucide="user-circle-2" class="text-teal-700 w-7 h-7"></i>
+        <div class="min-w-[140px]">
+          <div class="font-semibold text-slate-800">${esc(p.name)}</div>
+          <div class="flex gap-1 flex-wrap mt-1">
+            ${status?.type==="completed" ? badge("emerald","Completed") : ""}
+            ${status?.type==="cancelled" ? badge("rose", "Cancelled — "+status.reason) : ""}
+            ${!status ? badge("amber","Pending") : ""}
+            ${extras.length ? badge("teal", extras.length+" extra") : ""}
+            ${transports.length ? badge("slate", transports.length+" transport") : ""}
+          </div>
+          <div class="flex gap-1 flex-wrap mt-1.5">
+            ${shifts.map(sh=>`<span class="text-[11px] bg-slate-50 border border-slate-200 text-slate-600 rounded px-1.5 py-0.5">${esc(sh.serviceType)}${sh.startTime?` · ${fmtTime(sh.startTime)}–${fmtTime(sh.finishTime)}`:""} · ${sh.ratio}${sh.label?` · ${esc(sh.label)}`:""}</span>`).join("")}
+          </div>
+        </div>
+        ${state.role==="admin" ? `<div class="ml-auto flex gap-2 flex-wrap">
+          ${actionBtn("emerald","check","Completed",`openModal('complete','${p.id}')`)}
+          ${actionBtn("rose","x","Cancelled",`openModal('cancel','${p.id}')`)}
+          ${actionBtn("amber","plus","Extra Service",`openModal('extra','${p.id}')`)}
+          ${actionBtn("teal","car","Transport",`openModal('transport','${p.id}')`)}
+        </div>` : ""}
+      </div>
+      ${status?.type==="completed" ? `
+        <div class="mt-3 pt-3 border-t border-slate-100 text-xs text-slate-500 grid grid-cols-2 md:grid-cols-4 gap-2">
+          <div><i data-lucide="clock" class="w-3 h-3 inline mr-1"></i>${esc(status.startTime)}–${esc(status.finishTime)}</div>
+          <div><i data-lucide="user-circle-2" class="w-3 h-3 inline mr-1"></i>${esc(status.staff)}</div>
+          <div><i data-lucide="map-pin" class="w-3 h-3 inline mr-1"></i>${esc(status.location)}</div>
+          <div>${esc(status.supportType)}</div>
+        </div>` : ""}
+    </div>`;
+  }).join("");
+
+  return `
+  <div>
+    <h1 class="text-xl font-bold mb-1 font-display">${state.role==="admin"?"Today's Services":"Today's Service Records"}</h1>
+    <p class="text-sm text-slate-500 mb-4">Showing participants scheduled for ${todayDay()}. Participants with no service today are hidden.</p>
+    ${sched.length===0 ? `<div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-8 text-center text-slate-400">No participants are scheduled for ${todayDay()}.</div>` : `<div class="space-y-3">${rows}</div>`}
+  </div>`;
+}
+
+/* ---------------------------------------------------------
+   Participants tab
+--------------------------------------------------------- */
+let editingParticipantId = null;
+function renderParticipants(){
+  const rows = state.participants.map(p=>`
+    <tr class="border-t border-slate-100 dark:border-slate-700">
+      <td class="px-4 py-2.5">
+        ${editingParticipantId===p.id
+          ? `<input id="edit-name-input" class="${inputCls}" value="${esc(p.name)}" onkeydown="if(event.key==='Enter') saveParticipantName('${p.id}')" />`
+          : `<span class="font-medium text-slate-800 dark:text-slate-100">${esc(p.name)}</span>`}
+      </td>
+      <td class="px-4 py-2.5">
+        <select onchange="setParticipantHouse('${p.id}', this.value)" class="text-xs border border-slate-300 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 rounded-lg px-2 py-1">
+          <option value="">Unassigned</option>
+          ${state.houses.map(h=>`<option value="${h.id}" ${p.houseId===h.id?"selected":""}>${esc(h.name)}</option>`).join("")}
+        </select>
+      </td>
+      <td class="px-4 py-2.5"><button onclick="toggleActive('${p.id}')">${badge(p.active?"emerald":"slate", p.active?"Active":"Inactive")}</button></td>
+      <td class="px-4 py-2.5 text-right space-x-2">
+        ${editingParticipantId===p.id
+          ? `<button onclick="saveParticipantName('${p.id}')" class="text-emerald-700 text-xs font-medium">Save</button>`
+          : `<button onclick="startEditParticipant('${p.id}')" class="text-slate-500 hover:text-teal-700"><i data-lucide="pencil" class="w-4 h-4 inline"></i></button>`}
+        <button onclick="removeParticipant('${p.id}')" class="text-slate-500 hover:text-rose-600"><i data-lucide="trash-2" class="w-4 h-4 inline"></i></button>
+      </td>
+    </tr>`).join("");
+
+  return `
+  <div>
+    <h1 class="text-xl font-bold mb-4 font-display">Participants</h1>
+    ${cloudSyncStatus==="error"
+      ? `<div class="bg-rose-50 dark:bg-rose-900/30 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs rounded-lg px-3 py-2 mb-4 flex items-center gap-2"><i data-lucide="cloud-off" class="w-4 h-4 shrink-0"></i>Not connected to the cloud database (${esc(cloudSyncError||"")}) — changes here are only saved on this device until the connection is restored.</div>`
+      : `<div class="bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 text-xs rounded-lg px-3 py-2 mb-4 flex items-center gap-2"><i data-lucide="cloud" class="w-4 h-4 shrink-0"></i>Connected — houses, staff and participants sync live to every device.</div>`}
+    <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-4 mb-4">
+      <form onsubmit="return addParticipant(event)" class="flex gap-2">
+        <input id="new-participant-name" class="${inputCls}" placeholder="Full name of new participant" />
+        <button class="bg-teal-800 hover:bg-teal-900 text-white px-4 rounded-lg flex items-center gap-1 text-sm font-medium"><i data-lucide="plus" class="w-4 h-4"></i>Add</button>
+      </form>
+    </div>
+    <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden mb-4">
+      <table class="w-full text-sm">
+        <thead class="bg-slate-50 dark:bg-slate-900 text-slate-500 dark:text-slate-400 text-xs uppercase"><tr><th class="text-left px-4 py-2">Name</th><th class="text-left px-4 py-2">House</th><th class="text-left px-4 py-2">Status</th><th class="text-right px-4 py-2">Actions</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    ${renderHousesManager()}
+    ${renderStaffManager()}
+    ${renderLineItemsManager()}
+  </div>`;
+}
+function setParticipantHouse(participantId, houseId){
+  state.participants = state.participants.map(p=>p.id===participantId ? {...p, houseId: houseId || null} : p);
+  saveParticipants(); render();
+  sb.from("participants").upsert({ id: participantId, name: state.participants.find(p=>p.id===participantId)?.name, house_id: houseId || null, active: state.participants.find(p=>p.id===participantId)?.active ?? true }).then(({error})=>{ if(error) console.error(error); });
+}
+
+/* Houses — shared master data the standalone Night Support Monitoring app reads
+   to know which participants belong to which house, and whether a house phone
+   needs a PIN before staff can submit a log. */
+function renderHousesManager(){
+  const nameCounts = {};
+  state.houses.forEach(h=>{ const k=houseSlug(h); nameCounts[k]=(nameCounts[k]||0)+1; });
+  const rows = state.houses.map(h=>{
+    const participantCount = state.participants.filter(p=>p.houseId===h.id).length;
+    const isDuplicate = nameCounts[houseSlug(h)] > 1;
+    return `
+    <div class="border ${isDuplicate ? "border-rose-300 dark:border-rose-700" : "border-slate-200 dark:border-slate-700"} rounded-lg p-3 mb-2">
+      <div class="flex items-center gap-2 mb-1.5">
+        <i data-lucide="home" class="w-4 h-4 text-indigo-700 dark:text-indigo-400"></i>
+        <span class="font-medium text-sm text-slate-800 dark:text-slate-100">${esc(h.name)}</span>
+        <span class="text-xs text-slate-400">${h.pin ? "PIN protected" : "No PIN"}</span>
+        <span class="text-xs text-slate-400">· ${participantCount} participant${participantCount!==1?"s":""}</span>
+        ${isDuplicate ? `<span class="text-xs font-medium text-rose-600 dark:text-rose-400">· Duplicate name (id: ${esc(h.id)})</span>` : ""}
+        <button onclick="removeHouse('${h.id}')" class="ml-auto text-slate-400 hover:text-rose-600"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+      </div>
+      <div class="flex gap-2 items-center flex-wrap">
+        <input readonly class="${inputCls} text-xs flex-1 min-w-[220px]" value="${esc(buildHouseLink(h))}" onclick="this.select()" />
+        <button onclick="copyHouseLink('${h.id}')" class="bg-indigo-700 hover:bg-indigo-800 text-white text-xs px-3 py-2 rounded-lg">Copy Link</button>
+        <input placeholder="4-digit PIN (optional)" maxlength="4" value="${esc(h.pin||"")}" onchange="setHousePin('${h.id}', this.value)" class="${inputCls} text-xs w-36" />
+      </div>
+    </div>`;}).join("");
+  const hasDuplicates = Object.values(nameCounts).some(c=>c>1);
+  return `
+  <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-4 mb-4">
+    <div class="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-1">Houses — Night Support Monitoring links</div>
+    <p class="text-xs text-slate-500 dark:text-slate-400 mb-3">Each house gets its own link for the standalone Night Support Monitoring app (separate from this system). Bookmark it on the house phone. Optional PIN gates the form on that device.</p>
+    ${hasDuplicates ? `<div class="bg-rose-50 dark:bg-rose-900/30 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs rounded-lg px-3 py-2 mb-3">Two or more houses below share the same name — that produces the same staff link, and the entry page may open the wrong (empty) one. Check the participant counts, then delete whichever copy has 0 participants.</div>` : ""}
+    ${rows || `<div class="text-xs text-slate-400 mb-2">No houses yet — add one below.</div>`}
+    <form onsubmit="return addHouse(event)" class="flex gap-2 max-w-md mt-2">
+      <input id="new-house-name" class="${inputCls}" placeholder="e.g. Bradshaw House" />
+      <button class="bg-indigo-700 hover:bg-indigo-800 text-white px-3 rounded-lg"><i data-lucide="plus" class="w-4 h-4"></i></button>
+    </form>
+  </div>`;
+}
+function addHouse(e){
+  e.preventDefault();
+  const input = document.getElementById("new-house-name");
+  const name = input.value.trim();
+  if(!name) return false;
+  const house = { id: uid(), name, pin:"" };
+  state.houses.push(house);
+  saveHouses(); render();
+  sb.from("houses").upsert({ id:house.id, name:house.name, pin:"" }).then(({error})=>{ if(error) console.error(error); });
+  return false;
+}
+function removeHouse(id){
+  if(!confirm("Delete this house? Participants assigned to it will become unassigned.")) return;
+  state.houses = state.houses.filter(h=>h.id!==id);
+  state.participants = state.participants.map(p=>p.houseId===id ? {...p, houseId:null} : p);
+  saveHouses(); saveParticipants(); render();
+  sb.from("houses").delete().eq("id", id).then(({error})=>{ if(error) console.error(error); });
+  sb.from("participants").update({ house_id:null }).eq("house_id", id).then(({error})=>{ if(error) console.error(error); });
+}
+function setHousePin(id, pin){
+  const clean = pin.replace(/\D/g,"").slice(0,4);
+  state.houses = state.houses.map(h=>h.id===id ? {...h, pin:clean} : h);
+  saveHouses(); render();
+  const houseName = state.houses.find(h=>h.id===id)?.name || "";
+  sb.from("houses").upsert({ id, name: houseName, pin: clean }).then(({error})=>{ if(error) console.error(error); });
+}
+/* Staff — shared master list the standalone Night Support Monitoring app reads
+   so staff pick their name from a dropdown instead of retyping it each time. */
+function renderStaffManager(){
+  const rows = state.staff.map(s=>`
+    <div class="flex items-center gap-2 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 mb-2">
+      <i data-lucide="user" class="w-4 h-4 text-indigo-700 dark:text-indigo-400"></i>
+      <span class="text-sm font-medium text-slate-800 dark:text-slate-100">${esc(s.name)}</span>
+      <button onclick="removeStaff('${s.id}')" class="ml-auto text-slate-400 hover:text-rose-600"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+    </div>`).join("");
+  return `
+  <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-4 mb-4">
+    <div class="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-1">Staff — Night Support names list</div>
+    <p class="text-xs text-slate-500 dark:text-slate-400 mb-3">Names added here appear as a dropdown in the Night Support Monitoring form, so staff just pick their name instead of typing it.</p>
+    ${rows || `<div class="text-xs text-slate-400 mb-2">No staff yet — add names below.</div>`}
+    <form onsubmit="return addStaff(event)" class="flex gap-2 max-w-md mt-2">
+      <input id="new-staff-name" class="${inputCls}" placeholder="e.g. Priyanka" />
+      <button class="bg-indigo-700 hover:bg-indigo-800 text-white px-3 rounded-lg"><i data-lucide="plus" class="w-4 h-4"></i></button>
+    </form>
+  </div>`;
+}
+function addStaff(e){
+  e.preventDefault();
+  const input = document.getElementById("new-staff-name");
+  const name = input.value.trim();
+  if(!name) return false;
+  if(state.staff.some(s=>s.name.toLowerCase()===name.toLowerCase())){ input.value=""; return false; }
+  const person = { id: uid(), name };
+  state.staff.push(person);
+  saveStaff(); render();
+  sb.from("staff").upsert({ id:person.id, name:person.name }).then(({error})=>{ if(error) console.error(error); });
+  return false;
+}
+function removeStaff(id){
+  if(!confirm("Remove this staff name from the list?")) return;
+  state.staff = state.staff.filter(s=>s.id!==id);
+  saveStaff(); render();
+  sb.from("staff").delete().eq("id", id).then(({error})=>{ if(error) console.error(error); });
+}
+
+function copyHouseLink(id){
+  const h = state.houses.find(x=>x.id===id);
+  const tmp = document.createElement("input");
+  tmp.value = buildHouseLink(h);
+  document.body.appendChild(tmp); tmp.select();
+  document.execCommand && document.execCommand("copy");
+  navigator.clipboard?.writeText(tmp.value).catch(()=>{});
+  document.body.removeChild(tmp);
+}
+
+/* NDIS Line Item master list — single source of truth used by every dropdown in the app. */
+function renderLineItemsManager(){
+  const chips = state.lineItems.map((li,i)=>`
+    <span class="bg-teal-50 text-teal-800 text-xs px-2 py-1 rounded-full flex items-center gap-1">${esc(li)}
+      <button onclick="removeLineItem(${i})"><i data-lucide="x" class="w-3 h-3"></i></button>
+    </span>`).join("");
+  return `
+  <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-4">
+    <div class="text-sm font-semibold text-slate-700 mb-1">NDIS Line Item Master List</div>
+    <p class="text-xs text-slate-500 mb-3">Used in Completed Services, Extra Support, Monthly Roster and Reports. Add or remove items here and every dropdown updates automatically.</p>
+    <div class="flex flex-wrap gap-1.5 mb-3">${chips}</div>
+    <form onsubmit="return addLineItem(event)" class="flex gap-2 max-w-md">
+      <input id="new-line-item" class="${inputCls}" placeholder="e.g. 1:1 Personal Care" />
+      <button class="bg-teal-800 hover:bg-teal-900 text-white px-3 rounded-lg"><i data-lucide="plus" class="w-4 h-4"></i></button>
+    </form>
+  </div>`;
+}
+function addLineItem(e){
+  e.preventDefault();
+  const input = document.getElementById("new-line-item");
+  const v = input.value.trim();
+  if(!v) return false;
+  state.lineItems.push(v);
+  saveLineItems(); render();
+  return false;
+}
+function removeLineItem(idx){
+  state.lineItems = state.lineItems.filter((_,i)=>i!==idx);
+  saveLineItems(); render();
+}
+function addParticipant(e){
+  e.preventDefault();
+  const input = document.getElementById("new-participant-name");
+  const name = input.value.trim();
+  if(!name) return false;
+  const id = uid();
+  state.participants.push({ id, name, active:true });
+  state.rosters[id] = [];
+  saveParticipants(); saveRosters();
+  render();
+  sb.from("participants").upsert({ id, name, active:true, house_id:null }).then(({error})=>{ if(error) console.error(error); });
+  return false;
+}
+function removeParticipant(id){
+  if(!confirm("Delete this participant and their roster? This cannot be undone.")) return;
+  state.participants = state.participants.filter(p=>p.id!==id);
+  delete state.rosters[id];
+  saveParticipants(); saveRosters();
+  render();
+  sb.from("participants").delete().eq("id", id).then(({error})=>{ if(error) console.error(error); });
+}
+function toggleActive(id){
+  state.participants = state.participants.map(p=>p.id===id?{...p,active:!p.active}:p);
+  saveParticipants(); render();
+  const p = state.participants.find(p=>p.id===id);
+  sb.from("participants").upsert({ id, name: p.name, house_id: p.houseId||null, active: p.active }).then(({error})=>{ if(error) console.error(error); });
+}
+function startEditParticipant(id){ editingParticipantId = id; render(); }
+function saveParticipantName(id){
+  const val = document.getElementById("edit-name-input").value.trim();
+  state.participants = state.participants.map(p=>p.id===id && val ? {...p,name:val} : p);
+  editingParticipantId = null;
+  saveParticipants(); render();
+  const p = state.participants.find(p=>p.id===id);
+  if(val) sb.from("participants").upsert({ id, name: val, house_id: p.houseId||null, active: p.active }).then(({error})=>{ if(error) console.error(error); });
+}
+
+/* ---------------------------------------------------------
+   Roster tab — detailed shift blocks (days, times, ratio, label)
+--------------------------------------------------------- */
+let draftDays = new Set();
+function toggleDraftDay(day){
+  if(draftDays.has(day)) draftDays.delete(day); else draftDays.add(day);
+  // re-render just the checkbox styling without losing other field values
+  document.querySelectorAll(".day-chip").forEach(el=>{
+    const d = el.getAttribute("data-day");
+    const on = draftDays.has(d);
+    el.className = "day-chip cursor-pointer text-xs px-2.5 py-1.5 rounded-lg border font-medium " + (on ? "bg-teal-800 text-white border-teal-800" : "bg-white text-slate-600 border-slate-300");
+  });
+}
+function renderRoster(){
+  const roster = state.rosters[state.rosterParticipantId] || [];
+  draftDays = new Set(); // reset day-picker each render
+
+  const rows = roster.map(sh=>`
+    <tr class="border-t border-slate-100 dark:border-slate-700">
+      <td class="px-3 py-2 text-slate-500 text-xs">${sh.days.map(d=>d.slice(0,3)).join(", ")}</td>
+      <td class="px-3 py-2 font-medium">${esc(sh.serviceType)}</td>
+      <td class="px-3 py-2 text-slate-500">${sh.startTime ? `${fmtTime(sh.startTime)}–${fmtTime(sh.finishTime)}` : "—"}</td>
+      <td class="px-3 py-2">${badge("teal", sh.ratio)}</td>
+      <td class="px-3 py-2 text-slate-500">${esc(sh.label||"—")}</td>
+      <td class="px-3 py-2 text-right"><button onclick="removeShift('${sh.id}')" class="text-slate-400 hover:text-rose-600"><i data-lucide="trash-2" class="w-4 h-4"></i></button></td>
+    </tr>`).join("");
+
+  return `
+  <div>
+    <h1 class="text-xl font-bold mb-4 font-display">Monthly Roster of Care</h1>
+    ${field("Participant", `<select onchange="setState({rosterParticipantId:this.value})" class="${inputCls} max-w-sm">
+      ${state.participants.map(p=>`<option value="${p.id}" ${state.rosterParticipantId===p.id?"selected":""}>${esc(p.name)}</option>`).join("")}
+    </select>`)}
+
+    <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-x-auto mb-4">
+      <table class="w-full text-sm min-w-[640px]">
+        <thead class="bg-slate-50 dark:bg-slate-900 text-slate-500 dark:text-slate-400 text-xs uppercase"><tr>
+          <th class="text-left px-3 py-2">Days</th><th class="text-left px-3 py-2">Service</th><th class="text-left px-3 py-2">Time</th>
+          <th class="text-left px-3 py-2">Ratio</th><th class="text-left px-3 py-2">Label</th><th></th>
+        </tr></thead>
+        <tbody>${rows || `<tr><td colspan="6" class="text-center text-slate-400 dark:text-slate-500 py-8">No shifts added yet — add one below.</td></tr>`}</tbody>
+      </table>
+    </div>
+
+    <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-4">
+      <div class="text-sm font-semibold text-slate-700 mb-3">Add a shift block</div>
+      ${field("Applies on", `<div class="flex flex-wrap gap-1.5">${WEEK_ORDER.map(d=>`<span class="day-chip cursor-pointer text-xs px-2.5 py-1.5 rounded-lg border font-medium bg-white text-slate-600 border-slate-300" data-day="${d}" onclick="toggleDraftDay('${d}')">${d.slice(0,3)}</span>`).join("")}</div>`)}
+      <div class="grid sm:grid-cols-2 md:grid-cols-4 gap-3 mt-1">
+        ${field("Service type", `<input list="support-suggestions" id="shift-service" class="${inputCls}" placeholder="e.g. SIL" />`)}
+        ${field("Start time (optional)", `<input type="time" id="shift-start" class="${inputCls}" />`)}
+        ${field("Finish time (optional)", `<input type="time" id="shift-finish" class="${inputCls}" />`)}
+        ${field("Ratio", `<select id="shift-ratio" class="${inputCls}">${RATIOS.map(r=>`<option value="${r}">${r}</option>`).join("")}</select>`)}
+      </div>
+      ${field("Label (optional)", `<input id="shift-label" class="${inputCls} max-w-sm" placeholder="e.g. Active Night" />`)}
+      <button onclick="addShift()" class="bg-teal-800 hover:bg-teal-900 text-white text-sm font-medium px-4 py-2 rounded-lg flex items-center gap-1.5 mt-1"><i data-lucide="plus" class="w-4 h-4"></i>Add shift</button>
+    </div>
+    <datalist id="support-suggestions">${SUPPORT_TYPE_SUGGESTIONS.map(s=>`<option value="${esc(s)}">`).join("")}</datalist>
+  </div>`;
+}
+function addShift(){
+  const serviceType = val("shift-service").trim();
+  if(!serviceType){ alert("Enter a service type."); return; }
+  if(draftDays.size===0){ alert("Select at least one day."); return; }
+  const rid = state.rosterParticipantId;
+  if(!state.rosters[rid]) state.rosters[rid] = [];
+  state.rosters[rid].push({
+    id: uid(), serviceType,
+    days: WEEK_ORDER.filter(d=>draftDays.has(d)),
+    startTime: val("shift-start"), finishTime: val("shift-finish"),
+    ratio: val("shift-ratio") || "1:1", label: val("shift-label").trim(),
+  });
+  saveRosters(); render();
+}
+function removeShift(shiftId){
+  const rid = state.rosterParticipantId;
+  state.rosters[rid] = state.rosters[rid].filter(sh=>sh.id!==shiftId);
+  saveRosters(); render();
+}
+
+/* ---------------------------------------------------------
+   Reports tab
+--------------------------------------------------------- */
+const REPORT_TYPES = [["all","All Records"],["completed","Monthly Summary"],["transport","Transport Summary"],["cancelled","Cancellation Report"],["extra","Extra Service Report"]];
+function renderReports(){
+  const rows = reportRows();
+  const trs = rows.map(r=>`
+    <tr class="border-t border-slate-100 dark:border-slate-700">
+      <td class="px-3 py-2 whitespace-nowrap">${fmtDate(r.date)}</td>
+      <td class="px-3 py-2">${esc(participantName(r.participantId))}</td>
+      <td class="px-3 py-2 capitalize">${badge({completed:"emerald",cancelled:"rose",extra:"amber",transport:"teal"}[r.type], r.type)}</td>
+      <td class="px-3 py-2">${esc(r.staff || r.driver || "—")}</td>
+      <td class="px-3 py-2">${esc(r.ratio || "—")}</td>
+      <td class="px-3 py-2 text-slate-500">${esc(r.lineItem || "—")}</td>
+      <td class="px-3 py-2 text-slate-500 max-w-[220px] truncate" title="${esc(r.description||"")}">${esc(r.description || r.reason || "—")}</td>
+      <td class="px-3 py-2 whitespace-nowrap text-slate-500">${r.startTime ? `${esc(r.startTime)}–${esc(r.finishTime||"")}` : "—"}</td>
+      <td class="px-3 py-2">${r.type==="transport" ? r.totalKm : "—"}</td>
+    </tr>`).join("");
+
+  return `
+  <div>
+    <h1 class="text-xl font-bold mb-1 font-display">Reports</h1>
+    <p class="text-sm text-slate-500 mb-4">Filter by participant, staff or date range, then export for invoicing.</p>
+    <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-4 mb-4 print-hidden">
+      <div class="flex gap-1.5 flex-wrap mb-4">
+        ${REPORT_TYPES.map(([id,label])=>`<button onclick="setReport({type:'${id}'})" class="text-xs font-medium px-3 py-1.5 rounded-full border ${state.report.type===id?"bg-teal-800 text-white border-teal-800":"bg-white text-slate-600 border-slate-300"}">${label}</button>`).join("")}
+      </div>
+      <div class="grid sm:grid-cols-2 md:grid-cols-4 gap-3">
+        ${field("Participant", `<select onchange="setReport({participant:this.value})" class="${inputCls}">
+          <option value="all">All participants</option>
+          ${state.participants.map(p=>`<option value="${p.id}" ${state.report.participant===p.id?"selected":""}>${esc(p.name)}</option>`).join("")}
+        </select>`)}
+        ${field("Staff", `<input class="${inputCls}" value="${esc(state.report.staff)}" oninput="setReport({staff:this.value},true)" placeholder="Staff name" />`)}
+        ${field("From", `<input type="date" class="${inputCls}" value="${state.report.from}" onchange="setReport({from:this.value})" />`)}
+        ${field("To", `<input type="date" class="${inputCls}" value="${state.report.to}" onchange="setReport({to:this.value})" />`)}
+      </div>
+      <div class="flex gap-2 mt-2">
+        <button onclick="exportExcel()" class="bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-medium px-4 py-2 rounded-lg flex items-center gap-1.5"><i data-lucide="download" class="w-4 h-4"></i>Export to Excel</button>
+        <button onclick="window.print()" class="bg-slate-700 hover:bg-slate-800 text-white text-sm font-medium px-4 py-2 rounded-lg flex items-center gap-1.5"><i data-lucide="printer" class="w-4 h-4"></i>Export to PDF</button>
+      </div>
+    </div>
+    <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-x-auto">
+      <table class="w-full text-sm min-w-[1050px]">
+        <thead class="bg-slate-50 dark:bg-slate-900 text-slate-500 dark:text-slate-400 text-xs uppercase"><tr>
+          <th class="text-left px-3 py-2">Date</th><th class="text-left px-3 py-2">Participant</th><th class="text-left px-3 py-2">Type</th>
+          <th class="text-left px-3 py-2">Staff / Driver</th><th class="text-left px-3 py-2">Ratio</th><th class="text-left px-3 py-2">Line Item</th>
+          <th class="text-left px-3 py-2">Description</th><th class="text-left px-3 py-2">Start–Finish</th><th class="text-left px-3 py-2">Km</th>
+        </tr></thead>
+        <tbody>${trs || `<tr><td colspan="9" class="text-center text-slate-400 dark:text-slate-500 py-8">No records match these filters.</td></tr>`}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+function setReport(patch, skipFocusReset){
+  Object.assign(state.report, patch);
+  render();
+  if(skipFocusReset){
+    // no-op placeholder; full re-render already applied for text inputs via oninput
+  }
+}
+function exportExcel(){
+  const data = reportRows().map(r=>({
+    Participant: participantName(r.participantId), Type: r.type, Date: r.date, Staff: r.staff||"",
+    Start: r.startTime||"", Finish: r.finishTime||"", Duration: r.duration||"",
+    "Support Ratio": r.ratio||"", "NDIS Line Item": r.lineItem||"",
+    "Support Type / Service": r.supportType || r.serviceType || "", Location: r.location||"",
+    "Billing Type": r.billingType||"", "Funding Type": r.fundingType||"",
+    Reason: r.reason||"", Description: r.description||"", Notes: r.notes||"",
+    Vehicle: r.vehicle||"", Driver: r.driver||"", "Km Travelled": r.totalKm??"", Destination: r.destination||"",
+    "Return Destination": r.returnDestination||"", "Fuel Used": r.fuelUsed||"",
+    Repeat: r.repeat||"", "Created By": r.createdBy||"",
+  }));
+  const ws = XLSX.utils.json_to_sheet(data);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Report");
+  XLSX.writeFile(wb, `ndis-report-${state.report.type}-${today()}.xlsx`);
+}
+
+/* ---------------------------------------------------------
+   Action modal (Complete / Cancel / Extra / Transport)
+--------------------------------------------------------- */
+function openModal(type, participantId){ state.modal = { type, participantId }; renderModal(); }
+function closeModal(){ state.modal = null; document.getElementById("modal-root").innerHTML = ""; }
+
+function renderModal(){
+  const root = document.getElementById("modal-root");
+  if(!state.modal){ root.innerHTML = ""; return; }
+  const { type, participantId } = state.modal;
+  const p = state.participants.find(x=>x.id===participantId);
+  const meta = {
+    complete:{ title:`Service Completed — ${p.name}`, tone:"bg-emerald-700" },
+    cancel:{ title:`Cancelled — ${p.name}`, tone:"bg-rose-700" },
+    extra:{ title:`Extra Service — ${p.name}`, tone:"bg-amber-600" },
+    transport:{ title:`Transport — ${p.name}`, tone:"bg-teal-800" },
+  }[type];
+  const todaysServiceOptions = shiftsToday(p.id).map(sh=>sh.serviceType);
+  const staffList = staffSuggestions().map(s=>`<option value="${esc(s)}">`).join("");
+
+  let body = "";
+  if(type==="complete"){
+    const shifts = shiftsToday(p.id);
+    const activeShift = currentShiftForParticipant(p.id);
+    const shiftChips = shifts.map(sh=>`
+      <div class="text-xs px-2.5 py-1.5 rounded-lg border ${activeShift && sh.id===activeShift.id ? "bg-teal-50 border-teal-300 text-teal-800 font-medium" : "bg-white border-slate-200 text-slate-500"}">
+        ${sh.startTime ? `${fmtTime(sh.startTime)}–${fmtTime(sh.finishTime)}` : "No time set"} · ${esc(sh.serviceType)} · ${esc(sh.ratio)}${sh.label?` · ${esc(sh.label)}`:""}
+      </div>`).join("");
+    body = `
+      <div class="bg-slate-50 border border-slate-200 rounded-lg p-3 mb-4">
+        <div class="text-xs text-slate-500 mb-0.5">Participant</div>
+        <div class="font-semibold text-slate-800 mb-2">${esc(p.name)}</div>
+        <div class="text-xs text-slate-500 mb-1.5">Scheduled ${esc(todayDay())}, ${fmtDate(today())}</div>
+        <div class="space-y-1.5">${shiftChips || `<div class="text-xs text-slate-400">No rostered shift found for today — this will be saved as an ad hoc completion.</div>`}</div>
+      </div>
+      ${field("Description (required)", `<textarea required id="f-description" rows="3" class="${inputCls}" placeholder="What support was provided"></textarea>`)}
+      ${field("Notes (optional)", `<textarea id="f-notes" rows="2" class="${inputCls}"></textarea>`)}
+    `;
+  } else if(type==="cancel"){
+    body = `
+      ${field("Cancellation reason", `<select id="f-reason" class="${inputCls}">${CANCEL_REASONS.map(r=>`<option value="${esc(r)}">${esc(r)}</option>`).join("")}</select>`)}
+      ${field("Notes (optional)", `<textarea id="f-notes" rows="3" class="${inputCls}"></textarea>`)}
+    `;
+  } else if(type==="extra"){
+    body = `
+      ${field("Participant", `<select id="f-participant" class="${inputCls}">${state.participants.map(pp=>`<option value="${pp.id}" ${pp.id===p.id?"selected":""}>${esc(pp.name)}</option>`).join("")}</select>`)}
+      ${field("Date", `<input type="date" required id="f-date" value="${today()}" class="${inputCls}" />`)}
+      ${field("Service type", `<select id="f-serviceType" onchange="onExtraServiceTypeChange()" class="${inputCls}">${EXTRA_SERVICE_TYPES.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join("")}</select>`)}
+      <div id="billing-note" class="hidden mb-3 text-xs font-medium text-teal-700 bg-teal-50 border border-teal-200 rounded-lg px-3 py-2"></div>
+      ${field("Reason", `<input required id="f-reason" class="${inputCls}" />`)}
+      ${field("Description", `<textarea id="f-description" rows="2" class="${inputCls}"></textarea>`)}
+      ${field("Notes (optional)", `<textarea id="f-notes" rows="2" class="${inputCls}"></textarea>`)}
+    `;
+  } else if(type==="transport"){
+    body = `
+      <div class="grid grid-cols-2 gap-3">
+        ${field("Vehicle", `<input required id="f-vehicle" class="${inputCls}" placeholder="e.g. Toyota Hiace — ABC123" />`)}
+        ${field("Driver", `<input required id="f-driver" class="${inputCls}" />`)}
+      </div>
+      <div class="grid grid-cols-3 gap-3">
+        ${field("Start odometer", `<input type="number" required id="f-startOdo" oninput="updateKmPreview()" class="${inputCls}" />`)}
+        ${field("Finish odometer", `<input type="number" required id="f-finishOdo" oninput="updateKmPreview()" class="${inputCls}" />`)}
+        ${field("Total km", `<input disabled id="f-totalKm" class="${inputCls} bg-slate-100" value="" />`)}
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        ${field("Destination", `<input required id="f-destination" class="${inputCls}" />`)}
+        ${field("Return destination", `<input id="f-returnDestination" class="${inputCls}" />`)}
+      </div>
+      ${field("Fuel used (optional, L)", `<input type="number" id="f-fuelUsed" class="${inputCls}" />`)}
+    `;
+  }
+
+  root.innerHTML = `
+  <div class="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 p-4" onclick="if(event.target===this) closeModal()">
+    <div class="bg-white rounded-xl shadow-xl w-full ${type==='transport'?'max-w-2xl':'max-w-md'} max-h-[90vh] overflow-y-auto">
+      <div class="${meta.tone} text-white px-5 py-4 rounded-t-xl flex items-center gap-2">
+        <h3 class="font-semibold font-display">${esc(meta.title)}</h3>
+        <button onclick="closeModal()" class="ml-auto text-white/80 hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+      <div class="p-5">
+        <form onsubmit="return submitModal(event)">
+          ${body}
+          <button type="submit" class="w-full bg-teal-800 hover:bg-teal-900 text-white font-medium py-2.5 rounded-lg mt-2">Save record</button>
+        </form>
+      </div>
+    </div>
+  </div>`;
+  lucide.createIcons();
+  if(type==="extra") onExtraServiceTypeChange();
+}
+function updateKmPreview(){
+  const s = Number(document.getElementById("f-startOdo").value);
+  const f = Number(document.getElementById("f-finishOdo").value);
+  document.getElementById("f-totalKm").value = (document.getElementById("f-startOdo").value!=="" && document.getElementById("f-finishOdo").value!=="") ? Math.max(0, f-s) : "";
+}
+// Shows a quiet, read-only preview of how a service type will be billed —
+// informational only, never blocks or requires staff input.
+function onExtraServiceTypeChange(){
+  const note = document.getElementById("billing-note");
+  if(!note) return;
+  const cfg = EXTRA_SERVICE_CONFIG[val("f-serviceType")];
+  if(cfg){
+    note.textContent = `Will be billed as: ${cfg.billingType || cfg.lineItem} (${cfg.ratio})`;
+    note.classList.remove("hidden");
+  } else {
+    note.classList.add("hidden");
+  }
+}
+function val(id){ const el = document.getElementById(id); return el ? el.value : ""; }
+function submitModal(e){
+  e.preventDefault();
+  const { type, participantId } = state.modal;
+  const t = today();
+  let entry = { id: uid(), createdAt: new Date().toISOString(), participantId };
+  if(type==="complete"){
+    // All shift/billing detail is derived from the matched roster shift — staff
+    // only ever type the Description and optional Notes.
+    const shift = currentShiftForParticipant(participantId);
+    entry = { ...entry, type:"completed", date:t,
+      startTime: shift?.startTime || "", finishTime: shift?.finishTime || "",
+      staff: "", location: "",
+      supportType: shift?.serviceType || "", ratio: shift?.ratio || "",
+      lineItem: shift?.lineItem || deriveLineItem(shift?.serviceType, shift?.ratio),
+      description: val("f-description"), notes: val("f-notes"),
+    };
+    state.logs.push(entry);
+  } else if(type==="cancel"){
+    entry = { ...entry, type:"cancelled", date:t, reason:val("f-reason"), notes:val("f-notes") };
+    state.logs.push(entry);
+  } else if(type==="extra"){
+    const chosenParticipantId = val("f-participant") || participantId;
+    const serviceType = val("f-serviceType");
+    const cfg = EXTRA_SERVICE_CONFIG[serviceType] || {};
+    const nowIso = new Date().toISOString();
+    state.logs.push({
+      id: uid(), createdAt: nowIso, participantId: chosenParticipantId, type:"extra",
+      date: val("f-date"), serviceType,
+      fundingType: cfg.fundingType || "", ratio: cfg.ratio || "", lineItem: cfg.lineItem || "",
+      billingType: cfg.billingType || "",
+      reason: val("f-reason"), description: val("f-description"), notes: val("f-notes"),
+      createdBy: state.role, createdDate: nowIso, lastModified: nowIso,
+    });
+  } else if(type==="transport"){
+    const s = Number(val("f-startOdo")), f = Number(val("f-finishOdo"));
+    entry = { ...entry, type:"transport", date:t, vehicle:val("f-vehicle"), driver:val("f-driver"), startOdo:s, finishOdo:f, totalKm:Math.max(0,f-s), destination:val("f-destination"), returnDestination:val("f-returnDestination"), fuelUsed:val("f-fuelUsed") };
+    state.logs.push(entry);
+  }
+  saveLogs();
+  closeModal();
+  render();
+  return false;
+}
+
+function render(){
+  let content = "";
+  if(state.tab==="dashboard") content = renderDashboard();
+  else if(state.tab==="today") content = renderToday();
+  else if(state.tab==="participants" && state.role==="admin") content = renderParticipants();
+  else if(state.tab==="roster" && state.role==="admin") content = renderRoster();
+  else if(state.tab==="reports") content = renderReports();
+  else { state.tab = "dashboard"; content = renderDashboard(); }
+
+  document.getElementById("app").innerHTML = `
+    ${renderTopbar()}
+    ${renderNav()}
+    <div class="p-4 md:p-6 max-w-7xl mx-auto">${content}</div>
+  `;
+  lucide.createIcons();
+}
+window.setState = setState;
+document.getElementById("app").innerHTML = `<div class="min-h-screen flex items-center justify-center text-slate-400 text-sm">Loading…</div>`;
+bootCloudData();
+</script>
+</body>
+</html>
