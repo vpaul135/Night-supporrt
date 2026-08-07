@@ -14,7 +14,17 @@
 <style>
   body { font-family: 'Inter', sans-serif; }
   .font-display { font-family: 'Libre Franklin', sans-serif; }
-  @media print { .print-hidden { display: none !important; } }
+  @media print {
+    .print-hidden { display: none !important; }
+    @page { size: A4; margin: 12mm; }
+    body { background: white !important; color: black !important; font-size: 10px; }
+    .dark body, .dark { background: white !important; color: black !important; }
+    table { width: 100% !important; font-size: 9px; border-collapse: collapse; }
+    th, td { padding: 3px 5px !important; word-break: break-word; }
+    .print-report-header { display: block !important; }
+    a[href]:after { content: "" !important; }
+  }
+  .print-report-header { display: none; }
 </style>
 </head>
 <body class="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100 transition-colors">
@@ -347,11 +357,11 @@ function exportNightExcel(){
   rows.forEach(l=>{
     (l.interventions&&l.interventions.length ? l.interventions : [null]).forEach(iv=>{
       data.push({ Date:l.date, Participant:participantName(l.participantId), House:houseName(l.houseId), Staff:l.staffName||"",
-        "Shift Start":l.shiftStart||"", "Shift Finish":l.shiftFinish||"",
-        "Intervention Time":iv?.time||"", "Intervention Reason":iv?.reason||"", "Support Provided":iv?.support||"",
-        "Duration (min)":iv?.duration ?? "", "Returned to Sleep":iv ? (iv.returnedToSleep?"Yes":"No") : "",
+        "Intervention Time":iv?.time||"", "Intervention Reason":iv?.reason||"",
+        "Duration (min)":iv?.duration ?? "", "Notes":(iv?.notes ?? iv?.support ?? ""),
         "Total Interventions (night)":l.totalInterventions, "Total Minutes (night)":l.totalMinutes,
-        "Overall Night":l.overallNight, "High Support Alert":isHighSupportNight(l)?"Yes":"No", Comments:l.comments||"" });
+        "High Support Alert":isHighSupportNight(l)?"Yes":"No",
+        "Shift Start":l.shiftStart||"", "Shift Finish":l.shiftFinish||"", "Overall Night":l.overallNight||"", "Log Comments":l.comments||"" });
     });
   });
   const ws = XLSX.utils.json_to_sheet(data);
@@ -387,7 +397,7 @@ function renderEditNightModal(){
         <select onchange="editNightDraft.interventions[${i}].reason=this.value" class="${inputCls} text-xs">
           ${activeInterventionTypes().map(t=>`<option value="${esc(t.label)}" ${iv.reason===t.label?"selected":""}>${t.icon} ${esc(t.label)}</option>`).join("")}
         </select></label>
-      <label class="text-xs col-span-2"><span class="block text-slate-500 mb-0.5">Support provided</span><input value="${esc(iv.support||"")}" onchange="editNightDraft.interventions[${i}].support=this.value" class="${inputCls} text-xs" /></label>
+      <label class="text-xs col-span-2"><span class="block text-slate-500 mb-0.5">Notes</span><input value="${esc(iv.notes ?? iv.support ?? "")}" onchange="editNightDraft.interventions[${i}].notes=this.value" class="${inputCls} text-xs" /></label>
       <label class="text-xs col-span-1"><span class="block text-slate-500 mb-0.5">Duration (min) *</span><input type="number" min="0" required value="${iv.duration??""}" onchange="editNightDraft.interventions[${i}].duration=this.value===''?null:Number(this.value)" class="${inputCls} text-xs ${(iv.duration===null||iv.duration===undefined||iv.duration==='')?'border-rose-400':''}" /></label>
       <button onclick="editNightDraft.interventions.splice(${i},1); renderEditNightModal();" class="text-rose-500 hover:text-rose-700 text-xs flex items-center gap-1 justify-center py-2"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i>Remove</button>
     </div>`).join("");
@@ -404,7 +414,7 @@ function renderEditNightModal(){
       </div>
       <div class="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">Interventions (duration is required on every row)</div>
       ${ivRows || `<div class="text-xs text-slate-400 mb-2">No interventions recorded.</div>`}
-      <button onclick="editNightDraft.interventions.push({time:'',reason:activeInterventionTypes()[0]?.label||'',support:'',duration:null,returnedToSleep:true}); renderEditNightModal();" class="text-xs text-indigo-700 dark:text-indigo-400 font-medium mb-3">+ Add intervention</button>
+      <button onclick="editNightDraft.interventions.push({time:'',reason:activeInterventionTypes()[0]?.label||'',notes:'',duration:null}); renderEditNightModal();" class="text-xs text-indigo-700 dark:text-indigo-400 font-medium mb-3">+ Add intervention</button>
       ${field("Comments", `<textarea rows="2" onchange="editNightDraft.comments=this.value" class="${inputCls}">${esc(d.comments||"")}</textarea>`)}
       <div class="flex gap-2 justify-end mt-2">
         <button onclick="closeEditNightModal()" class="px-4 py-2 text-sm rounded-lg border border-slate-300 dark:border-slate-600">Cancel</button>
@@ -986,8 +996,8 @@ function renderAdminDashboard(){
 function exportAdditionalSupportExcel(){
   const rows = filteredAdditionalSupport();
   const data = rows.map(l=>({ Date:l.date, Participant:participantName(l.participantId), House:houseName(l.houseId), Staff:l.staffName||"",
-    Purpose:l.supportType||"", "Start Time":l.startTime||"", "Finish Time":l.finishTime||"", "Total Hours":l.totalHours,
-    Kilometres:l.km, Destination:l.destination||"", Notes:l.notes||"" }));
+    "Activity Type":l.supportType||"", "Start Time":l.startTime||"", "End Time":l.finishTime||"", "Duration (hrs)":l.totalHours,
+    Kilometres:l.km, Notes:(l.notes||l.destination||"") }));
   const ws = XLSX.utils.json_to_sheet(data);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Additional Support");
@@ -1006,11 +1016,12 @@ function renderAdditionalSupportDashboard(){
       <td class="px-3 py-2 whitespace-nowrap">${fmtDate(l.date)}</td>
       <td class="px-3 py-2">${esc(participantName(l.participantId))}</td>
       <td class="px-3 py-2">${esc(l.staffName||"—")}</td>
+      <td class="px-3 py-2">${esc(l.supportType||"—")}</td>
+      <td class="px-3 py-2">${esc(l.startTime||"—")}</td>
+      <td class="px-3 py-2">${esc(l.finishTime||"—")}</td>
       <td class="px-3 py-2">${l.totalHours}h</td>
       <td class="px-3 py-2">${l.km} km</td>
-      <td class="px-3 py-2">${esc(l.destination||"—")}</td>
-      <td class="px-3 py-2">${esc(l.supportType||"—")}</td>
-      <td class="px-3 py-2 max-w-[200px] truncate" title="${esc(l.notes||"")}">${esc(l.notes||"—")}</td>
+      <td class="px-3 py-2 max-w-[200px] truncate" title="${esc(l.notes||l.destination||"")}">${esc(l.notes||l.destination||"—")}</td>
       <td class="px-3 py-2 text-right whitespace-nowrap print-hidden">
         <button onclick="openEditAdditionalSupport('${l.id}')" class="text-slate-400 hover:text-indigo-700 p-1"><i data-lucide="pencil" class="w-4 h-4"></i></button>
         <button onclick="deleteAdditionalSupport('${l.id}')" class="text-slate-400 hover:text-rose-600 p-1"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
@@ -1051,12 +1062,12 @@ function renderAdditionalSupportDashboard(){
       </div>
 
       <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-x-auto">
-        <table class="w-full text-sm min-w-[900px]">
+        <table class="w-full text-sm min-w-[980px]">
           <thead class="bg-slate-50 dark:bg-slate-900 text-slate-500 dark:text-slate-400 text-xs uppercase"><tr>
-            <th class="text-left px-3 py-2">Date</th><th class="text-left px-3 py-2">Participant</th><th class="text-left px-3 py-2">Staff</th>
-            <th class="text-left px-3 py-2">Hours</th><th class="text-left px-3 py-2">Kilometres</th><th class="text-left px-3 py-2">Destination</th><th class="text-left px-3 py-2">Purpose</th><th class="text-left px-3 py-2">Notes</th><th class="text-right px-3 py-2 print-hidden">Actions</th>
+            <th class="text-left px-3 py-2">Date</th><th class="text-left px-3 py-2">Participant</th><th class="text-left px-3 py-2">Staff</th><th class="text-left px-3 py-2">Activity Type</th>
+            <th class="text-left px-3 py-2">Start</th><th class="text-left px-3 py-2">End</th><th class="text-left px-3 py-2">Duration</th><th class="text-left px-3 py-2">Kilometres</th><th class="text-left px-3 py-2">Notes</th><th class="text-right px-3 py-2 print-hidden">Actions</th>
           </tr></thead>
-          <tbody>${tableRows || `<tr><td colspan="9" class="text-center text-slate-400 dark:text-slate-500 py-8">No Additional Support records yet for this filter.</td></tr>`}</tbody>
+          <tbody>${tableRows || `<tr><td colspan="10" class="text-center text-slate-400 dark:text-slate-500 py-8">No Additional Support records yet for this filter.</td></tr>`}</tbody>
         </table>
       </div>
     </div>`;
@@ -1069,6 +1080,22 @@ function reportTitle(){
   const who = f.participant!=="all" ? participantName(f.participant) : `${BRAND_NAME} — ${BRAND_BRANCH}`;
   const kind = f.reportType==="additional" ? "Additional Support Report" : f.reportType==="combined" ? "Support Report" : "Night Intervention Log Report";
   return `${who} – ${kind}`;
+}
+function interventionDetailRows(rows){
+  // Flattens every individual intervention across the filtered night logs
+  // into one row each — management can see exactly what happened, not
+  // just aggregated counts.
+  const flat = [];
+  rows.forEach(l=>{
+    (l.interventions||[]).forEach(iv=>{
+      flat.push({ date:l.date, time:iv.time||"", participant:participantName(l.participantId), staff:l.staffName||"—",
+        reason:iv.reason||"—", duration:iv.duration ?? "", notes: iv.notes ?? iv.support ?? "" });
+    });
+  });
+  return flat.sort((a,b)=>{
+    if(a.date!==b.date) return a.date<b.date?1:-1; // most recent night first
+    return a.time<b.time?-1:1; // chronological within the night
+  });
 }
 function dailyBreakdownRows(rows){
   const byDate = {};
@@ -1092,13 +1119,13 @@ function exportCombinedExcel(){
     const nRows = filteredNightLogs(); const data=[];
     nRows.forEach(l=>{ (l.interventions&&l.interventions.length?l.interventions:[null]).forEach(iv=>{
       data.push({ Date:l.date, Participant:participantName(l.participantId), House:houseName(l.houseId), Staff:l.staffName||"",
-        "Intervention Reason":iv?.reason||"", "Duration (min)":iv?.duration??"", "Total Minutes (night)":l.totalMinutes, "Overall Night":l.overallNight, Comments:l.comments||"" }); }); });
+        "Time":iv?.time||"", "Reason":iv?.reason||"", "Duration (min)":iv?.duration??"", "Notes":(iv?.notes ?? iv?.support ?? "") }); }); });
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), "Night Support");
   }
   if(f.reportType==="additional" || f.reportType==="combined"){
     const aRows = filteredAdditionalSupport();
-    const data = aRows.map(l=>({ Date:l.date, Participant:participantName(l.participantId), Staff:l.staffName||"", Purpose:l.supportType||"",
-      "Total Hours":l.totalHours, Kilometres:l.km, Destination:l.destination||"", Notes:l.notes||"" }));
+    const data = aRows.map(l=>({ Date:l.date, Participant:participantName(l.participantId), Staff:l.staffName||"", "Activity Type":l.supportType||"",
+      "Start Time":l.startTime||"", "End Time":l.finishTime||"", "Duration (hrs)":l.totalHours, Kilometres:l.km, Notes:(l.notes||l.destination||"") }));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), "Additional Support");
   }
   XLSX.writeFile(wb, `${reportTitle().replace(/[^a-z0-9]+/gi,"-")}.xlsx`);
@@ -1114,6 +1141,7 @@ function renderReports(){
   const aTotals = additionalSupportTotals(aRows);
   const distinctNights = new Set(nRows.map(r=>r.date)).size;
   const daily = dailyBreakdownRows(nRows);
+  const interventionDetails = interventionDetailRows(nRows);
   const showNight = f.reportType==="night" || f.reportType==="combined";
   const showAdditional = f.reportType==="additional" || f.reportType==="combined";
 
@@ -1121,8 +1149,29 @@ function renderReports(){
     ${brandHeader("Reports")}
     ${topNav("reports")}
     <div class="p-4 max-w-4xl mx-auto">
-      <h1 class="text-xl font-bold mb-1 font-display">${esc(reportTitle())}</h1>
-      <p class="text-sm text-slate-500 dark:text-slate-400 mb-4">Operational support report — reporting period ${f.from?fmtDate(f.from):"start"} to ${f.to?fmtDate(f.to):"today"}.</p>
+      <div class="print-report-header mb-5 pb-3" style="border-bottom:2px solid #1e293b;">
+        <div style="display:flex; align-items:center; gap:12px;">
+          <img src="${LOGO_B64}" alt="Excel Care Group Australia" style="height:30px; width:auto; background:white; border-radius:4px; padding:2px 5px;" />
+          <div>
+            <div style="font-weight:800; font-size:14px; color:#1e293b;">Excel Care Group Australia</div>
+            <div style="font-size:10px; color:#475569;">Night Support &amp; Additional Support Reporting</div>
+          </div>
+        </div>
+        <div style="margin-top:10px; font-size:13px; font-weight:700; color:#1e293b;">${esc(reportTitle())}</div>
+        <div style="font-size:10px; color:#334155; margin-top:2px;">
+          ${f.participant!=="all" ? esc(participantName(f.participant)) : "All Participants"}
+          ${f.house!=="all" ? " · "+esc(houseName(f.house)) : " · All Houses"}
+          &nbsp;·&nbsp;Reporting period ${f.from?fmtDate(f.from):"start"} to ${f.to?fmtDate(f.to):"today"}
+        </div>
+        <div style="font-size:9px; color:#64748b; margin-top:2px;">Generated ${new Date().toLocaleString('en-AU', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' })}</div>
+      </div>
+      <h1 class="text-xl font-bold mb-1 font-display print-hidden">${esc(reportTitle())}</h1>
+      <p class="text-sm text-slate-500 dark:text-slate-400 mb-0.5 print-hidden">
+        ${f.participant!=="all" ? esc(participantName(f.participant)) : "All Participants"}
+        ${f.house!=="all" ? " · "+esc(houseName(f.house)) : ""}
+        · Reporting period ${f.from?fmtDate(f.from):"start"} to ${f.to?fmtDate(f.to):"today"}
+      </p>
+      <p class="text-xs text-slate-400 dark:text-slate-500 mb-4 print-hidden">Generated ${new Date().toLocaleString('en-AU', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' })}</p>
 
       <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-4 mb-4 print-hidden">
         <div class="grid sm:grid-cols-3 gap-3">
@@ -1180,6 +1229,18 @@ function renderReports(){
             <td class="px-3 py-2">${d.minutes} min</td><td class="px-3 py-2">${badge(NIGHT_RATING_TONE[d.rating]||"slate", d.rating)}</td><td class="px-3 py-2">${esc(d.mainReasons)}</td>
           </tr>`).join("") || `<tr><td colspan="6" class="text-center text-slate-400 py-6">No records for this period.</td></tr>`}</tbody>
         </table>
+      </div>
+      <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-x-auto mb-4">
+        <div class="text-sm font-semibold text-slate-700 dark:text-slate-200 px-4 pt-4 pb-2">Intervention Detail — every individual intervention in this period</div>
+        <table class="w-full text-sm min-w-[700px]">
+          <thead class="bg-slate-50 dark:bg-slate-900 text-slate-500 dark:text-slate-400 text-xs uppercase"><tr>
+            <th class="text-left px-3 py-2">Date</th><th class="text-left px-3 py-2">Time</th><th class="text-left px-3 py-2">Participant</th><th class="text-left px-3 py-2">Staff</th><th class="text-left px-3 py-2">Reason</th><th class="text-left px-3 py-2">Duration</th><th class="text-left px-3 py-2">Notes</th>
+          </tr></thead>
+          <tbody>${interventionDetails.map(d=>`<tr class="border-t border-slate-100 dark:border-slate-700">
+            <td class="px-3 py-2 whitespace-nowrap">${fmtDate(d.date)}</td><td class="px-3 py-2 whitespace-nowrap">${esc(d.time)}</td><td class="px-3 py-2">${esc(d.participant)}</td>
+            <td class="px-3 py-2">${esc(d.staff)}</td><td class="px-3 py-2">${esc(d.reason)}</td><td class="px-3 py-2">${d.duration!==""?d.duration+" min":"—"}</td><td class="px-3 py-2 max-w-[240px] truncate" title="${esc(d.notes)}">${esc(d.notes||"—")}</td>
+          </tr>`).join("") || `<tr><td colspan="7" class="text-center text-slate-400 py-6">No interventions recorded for this period.</td></tr>`}</tbody>
+        </table>
       </div>` : ""}
 
       ${showAdditional ? `
@@ -1194,14 +1255,15 @@ function renderReports(){
           Across ${aTotals.sessions} session${aTotals.sessions!==1?"s":""} in this period, staff provided ${aTotals.hours} hour${aTotals.hours===1?"":"s"} of additional support and travelled ${aTotals.km} kilometres.
         </p>
         <div class="overflow-x-auto -mx-5">
-          <table class="w-full text-sm min-w-[700px]">
+          <table class="w-full text-sm min-w-[820px]">
             <thead class="bg-slate-50 dark:bg-slate-900 text-slate-500 dark:text-slate-400 text-xs uppercase"><tr>
-              <th class="text-left px-3 py-2">Date</th><th class="text-left px-3 py-2">Pickup Time</th><th class="text-left px-3 py-2">Drop-off Time</th><th class="text-left px-3 py-2">Total Hours</th><th class="text-left px-3 py-2">Kilometres</th><th class="text-left px-3 py-2">Destination</th><th class="text-left px-3 py-2">Purpose</th><th class="text-left px-3 py-2">Staff</th>
+              <th class="text-left px-3 py-2">Date</th><th class="text-left px-3 py-2">Participant</th><th class="text-left px-3 py-2">Staff</th><th class="text-left px-3 py-2">Activity Type</th><th class="text-left px-3 py-2">Start Time</th><th class="text-left px-3 py-2">End Time</th><th class="text-left px-3 py-2">Duration</th><th class="text-left px-3 py-2">Kilometres</th><th class="text-left px-3 py-2">Notes</th>
             </tr></thead>
             <tbody>${aRows.map(l=>`<tr class="border-t border-slate-100 dark:border-slate-700">
-              <td class="px-3 py-2 whitespace-nowrap">${fmtDate(l.date)}</td><td class="px-3 py-2">${esc(l.startTime||"—")}</td><td class="px-3 py-2">${esc(l.finishTime||"—")}</td>
-              <td class="px-3 py-2">${l.totalHours}h</td><td class="px-3 py-2">${l.km} km</td><td class="px-3 py-2">${esc(l.destination||"—")}</td><td class="px-3 py-2">${esc(l.supportType||"—")}</td><td class="px-3 py-2">${esc(l.staffName||"—")}</td>
-            </tr>`).join("") || `<tr><td colspan="8" class="text-center text-slate-400 py-6">No records for this period.</td></tr>`}</tbody>
+              <td class="px-3 py-2 whitespace-nowrap">${fmtDate(l.date)}</td><td class="px-3 py-2">${esc(participantName(l.participantId))}</td><td class="px-3 py-2">${esc(l.staffName||"—")}</td>
+              <td class="px-3 py-2">${esc(l.supportType||"—")}</td><td class="px-3 py-2">${esc(l.startTime||"—")}</td><td class="px-3 py-2">${esc(l.finishTime||"—")}</td>
+              <td class="px-3 py-2">${l.totalHours}h</td><td class="px-3 py-2">${l.km} km</td><td class="px-3 py-2 max-w-[200px] truncate" title="${esc(l.notes||l.destination||"")}">${esc(l.notes||l.destination||"—")}</td>
+            </tr>`).join("") || `<tr><td colspan="9" class="text-center text-slate-400 py-6">No records for this period.</td></tr>`}</tbody>
           </table>
         </div>
       </div>` : ""}

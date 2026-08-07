@@ -249,10 +249,13 @@ function saveStaff(){ saveKey("ndis-staff", state.staff); }
 // participants belong to which house, and whether a house phone needs a PIN.
 function houseSlug(house){ return house.name.toLowerCase().trim().replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,""); }
 function buildHouseLink(house){
-  // Resolved relative to this file's own location (works for file:// opens,
-  // any subfolder, and any domain — not just origin root) so it never
-  // produces an invalid file:///night-support-entry.html path.
-  return new URL(`night-support-entry.html?house=${houseSlug(house)}`, location.href).href;
+  // Uses the clean-URL folder (/night-support/?house=slug) added alongside the
+  // original .html file — resolved relative to this file's own location (not
+  // a hardcoded domain), so it stays correct on GitHub Pages regardless of
+  // repo name or custom domain. The old night-support-entry.html?house=...
+  // links are untouched and keep working — this only changes what NEW links
+  // get copied going forward.
+  return new URL(`night-support/?house=${houseSlug(house)}`, location.href).href;
 }
 
 function setState(patch){ Object.assign(state, patch); render(); }

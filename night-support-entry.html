@@ -50,7 +50,7 @@ function minsBetween(a,b){ if(!a||!b) return 0; const [ah,am]=a.split(":").map(N
 function houseUnlocked(id){ return localStorage.getItem("ndis-house-unlocked-"+id)==="1"; }
 function unlockHouse(id){ localStorage.setItem("ndis-house-unlocked-"+id,"1"); }
 
-let state = { houses: [], participants: [], interventionTypes: [], supportTypes: [], cloudError: null };
+let state = { houses: [], participants: [], interventionTypes: [], supportTypes: [], staff: [], cloudError: null };
 function nightCategories(){
   const active = state.interventionTypes.filter(t=>t.active!==false).sort((a,b)=>a.sortOrder-b.sortOrder).map(t=>t.label);
   return active.length ? active : DEFAULT_CATEGORIES;
@@ -59,6 +59,7 @@ function supportActivityTypes(){
   const active = state.supportTypes.filter(t=>t.active!==false).sort((a,b)=>a.sortOrder-b.sortOrder).map(t=>t.label);
   return active.length ? active : DEFAULT_ACTIVITY_TYPES;
 }
+function activeStaffNames(){ return state.staff.filter(s=>s.active!==false).map(s=>s.name).sort((a,b)=>a.localeCompare(b)); }
 let view = "home";          // home | pin | chooser | nightlog | support | success
 let activeHouseId = null;
 let pinEntry = "";
@@ -75,10 +76,9 @@ async function boot(){
     console.error(e);
     state.cloudError = e.message || "Could not reach the server.";
   }
-  // Intervention/support types are optional — if either table is empty,
-  // missing, or fails to load, nightCategories()/supportActivityTypes()
-  // fall back to the fixed default lists, so a problem here never blocks
-  // the rest of the app.
+  // Intervention/support/staff lists are optional — if any table is empty,
+  // missing, or fails to load, the relevant dropdown just falls back
+  // gracefully, so a problem here never blocks houses/participants.
   try{
     const iRes = await sb.from("intervention_types").select("*");
     if(!iRes.error) state.interventionTypes = (iRes.data||[]).map(t=>({ id:t.id, label:t.label, sortOrder:t.sort_order||0, active:t.active!==false }));
@@ -87,6 +87,10 @@ async function boot(){
     const sRes = await sb.from("support_types").select("*");
     if(!sRes.error) state.supportTypes = (sRes.data||[]).map(t=>({ id:t.id, label:t.label, sortOrder:t.sort_order||0, active:t.active!==false }));
   }catch(e){ console.error("support_types load failed, using defaults", e); }
+  try{
+    const stRes = await sb.from("staff").select("*");
+    if(!stRes.error) state.staff = (stRes.data||[]).map(s=>({ id:s.id, name:s.name, active:s.active!==false }));
+  }catch(e){ console.error("staff load failed", e); }
 
   render();
   handleHouseLink();
@@ -103,7 +107,36 @@ async function boot(){
     .on("postgres_changes", { event:"*", schema:"public", table:"support_types" }, ()=>{
       sb.from("support_types").select("*").then(({data,error})=>{ if(!error && data){ state.supportTypes = data.map(t=>({id:t.id,label:t.label,sortOrder:t.sort_order||0,active:t.active!==false})); render(); } });
     })
+    .on("postgres_changes", { event:"*", schema:"public", table:"staff" }, ()=>{
+      sb.from("staff").select("*").then(({data,error})=>{ if(!error && data){ state.staff = data.map(s=>({id:s.id,name:s.name,active:s.active!==false})); render(); } });
+    })
     .subscribe();
+}
+
+/* ---------- Shared staff-name dropdown (used by both forms) ----------
+   Falls back to a free-text field if the staff list is empty. Always
+   remembers the last name used on this device as the default. */
+function staffFieldHtml(draftVar){
+  const names = activeStaffNames();
+  const draft = draftVar==="nightDraft" ? nightDraft : supportDraft;
+  const useOther = draft.staffOther || (draft.staffName && !names.includes(draft.staffName));
+  if(!names.length || useOther){
+    return `<div class="flex gap-2">
+      <input value="${esc(draft.staffName)}" oninput="${draftVar}.staffName=this.value" class="${inputCls} flex-1" placeholder="Your name" />
+      ${names.length ? `<button type="button" onclick="${draftVar}.staffOther=false; ${draftVar}.staffName=''; render();" class="tap text-xs text-indigo-700 dark:text-indigo-400 shrink-0 px-2 font-medium">List</button>` : ""}
+    </div>`;
+  }
+  return `<select onchange="setStaffName('${draftVar}', this.value)" class="${inputCls}">
+    <option value="">Select your name…</option>
+    ${names.map(n=>`<option value="${esc(n)}" ${draft.staffName===n?"selected":""}>${esc(n)}</option>`).join("")}
+    <option value="__other__">Other (type name)…</option>
+  </select>`;
+}
+function setStaffName(draftVar, val){
+  const draft = draftVar==="nightDraft" ? nightDraft : supportDraft;
+  if(val==="__other__"){ draft.staffOther = true; draft.staffName = ""; }
+  else { draft.staffOther = false; draft.staffName = val; localStorage.setItem("ndis-last-staff-name", val); }
+  render();
 }
 
 /* ---------- Shared shell ---------- */
@@ -226,25 +259,62 @@ function startNightLog(){
   render();
 }
 function nightParticipants(){ return state.participants.filter(p=>p.houseId===activeHouseId && p.active!==false); }
-function addNightEntry(){
-  nightDraft.entries.push({ time: nowTime(), category: nightCategories()[0], notes:"" });
+
+/* Add Entry — small modal: Time / Reason / Duration (required) / Notes */
+let entryDraft = null;
+function openAddEntry(){
+  entryDraft = { time: nowTime(), reason: nightCategories()[0], duration:"", notes:"" };
+  renderEntryModal();
+}
+function closeEntryModal(){ entryDraft = null; document.getElementById("sheet-root").innerHTML = ""; }
+function renderEntryModal(){
+  const missingDuration = entryDraft.duration===""||entryDraft.duration===null||entryDraft.duration===undefined;
+  document.getElementById("sheet-root").innerHTML = `
+  <div class="fixed inset-0 bg-black/50 flex items-end z-50 tap" onclick="if(event.target===this) closeEntryModal()">
+    <div class="bg-white dark:bg-slate-800 rounded-t-3xl w-full p-6 pb-8 max-h-[88vh] overflow-y-auto">
+      <div class="w-10 h-1.5 bg-slate-300 dark:bg-slate-600 rounded-full mx-auto mb-5"></div>
+      <div class="text-center font-bold text-lg mb-5">Add Entry</div>
+      ${field("Time", `<input type="time" value="${entryDraft.time}" onchange="entryDraft.time=this.value" class="${inputCls} text-lg" />`)}
+      ${field("Reason", `<select onchange="entryDraft.reason=this.value" class="${inputCls}">
+        ${nightCategories().map(c=>`<option ${entryDraft.reason===c?"selected":""}>${c}</option>`).join("")}
+      </select>`)}
+      ${field("Duration (minutes) *required*", `<input type="number" min="0" inputmode="numeric" value="${entryDraft.duration}" oninput="entryDraft.duration=this.value; renderEntryModal();" class="${inputCls} text-lg ${missingDuration?'border-rose-400 focus:ring-rose-500':''}" placeholder="e.g. 15" />`)}
+      ${missingDuration ? `<div class="text-xs text-rose-600 -mt-3 mb-4">Duration is required.</div>` : ""}
+      ${field("Notes (optional)", `<textarea rows="2" oninput="entryDraft.notes=this.value" class="${inputCls} text-sm">${esc(entryDraft.notes)}</textarea>`)}
+      <button onclick="confirmAddEntry()" ${missingDuration?"disabled":""} class="tap w-full ${missingDuration?'bg-slate-300 dark:bg-slate-700 cursor-not-allowed':'bg-indigo-700'} text-white font-bold rounded-2xl py-4 mt-1">Add</button>
+    </div>
+  </div>`;
+}
+function confirmAddEntry(){
+  if(entryDraft.duration===""||entryDraft.duration===null||entryDraft.duration===undefined){ return; }
+  nightDraft.entries.push({ time: entryDraft.time, reason: entryDraft.reason, duration: Number(entryDraft.duration), notes: entryDraft.notes });
+  closeEntryModal();
   render();
 }
 function removeNightEntry(i){ nightDraft.entries.splice(i,1); render(); }
+function fmt12h(t){
+  if(!t) return "";
+  let [h,m] = t.split(":").map(Number);
+  const ap = h>=12 ? "PM" : "AM";
+  h = h%12; if(h===0) h=12;
+  return `${h}:${String(m).padStart(2,"0")} ${ap}`;
+}
 function renderNightLog(){
   const house = state.houses.find(h=>h.id===activeHouseId);
   const parts = nightParticipants();
   const app = document.getElementById("app");
-  const entriesHtml = nightDraft.entries.map((e,i)=>`
-    <div class="bg-slate-50 dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-700 rounded-xl p-4 mb-3">
-      <div class="flex gap-3 mb-3">
-        <input type="time" value="${e.time}" onchange="nightDraft.entries[${i}].time=this.value" class="${inputCls} w-32" />
-        <select onchange="nightDraft.entries[${i}].category=this.value" class="${inputCls} flex-1">
-          ${nightCategories().map(c=>`<option ${e.category===c?"selected":""}>${c}</option>`).join("")}
-        </select>
+  // Compact summary, e.g. "10:15 PM — Repositioning — 15 min"
+  const entriesHtml = nightDraft.entries
+    .slice()
+    .map((e,i)=>({e,i}))
+    .sort((a,b)=> a.e.time < b.e.time ? -1 : 1)
+    .map(({e,i})=>`
+    <div class="flex items-center gap-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 mb-2">
+      <div class="flex-1 text-sm">
+        <span class="font-semibold">${fmt12h(e.time)}</span> — ${esc(e.reason)} — <span class="font-semibold">${e.duration} min</span>
+        ${e.notes ? `<div class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">${esc(e.notes)}</div>` : ""}
       </div>
-      <textarea placeholder="Notes (optional)" rows="2" onchange="nightDraft.entries[${i}].notes=this.value" class="${inputCls} text-sm">${esc(e.notes)}</textarea>
-      <button onclick="removeNightEntry(${i})" class="tap text-rose-600 text-sm font-medium mt-2">Remove entry</button>
+      <button onclick="removeNightEntry(${i})" class="tap text-rose-500 text-xl leading-none px-1">×</button>
     </div>`).join("");
 
   app.innerHTML = `${header(house.name+" · Night Log")}
@@ -256,15 +326,16 @@ function renderNightLog(){
         </div>` : `
       ${field("House", `<div class="${inputCls} bg-slate-100 dark:bg-slate-800 text-slate-500">${esc(house.name)}</div>`)}
       ${field("Date", `<input type="date" value="${nightDraft.date}" onchange="nightDraft.date=this.value" class="${inputCls}" />`)}
-      ${field("Staff Name", `<input value="${esc(nightDraft.staffName)}" oninput="nightDraft.staffName=this.value" class="${inputCls}" placeholder="Your name" />`)}
+      ${field("Staff", staffFieldHtml("nightDraft"))}
       ${field("Participant", `<select onchange="nightDraft.participantId=this.value" class="${inputCls}">
         <option value="">Select participant…</option>
         ${parts.map(p=>`<option value="${p.id}" ${nightDraft.participantId===p.id?"selected":""}>${esc(p.name)}</option>`).join("")}
       </select>`)}
 
       <div class="border-t-2 border-slate-100 dark:border-slate-800 pt-4 mt-2">
+        <div class="text-sm font-semibold text-slate-600 dark:text-slate-300 mb-2">${nightDraft.entries.length ? `Entries added (${nightDraft.entries.length})` : ""}</div>
         ${entriesHtml}
-        <button onclick="addNightEntry()" class="tap w-full border-2 border-dashed border-indigo-300 dark:border-indigo-700 text-indigo-700 dark:text-indigo-400 font-semibold rounded-xl py-4 mb-4">+ Add Entry</button>
+        <button onclick="openAddEntry()" class="tap w-full border-2 border-dashed border-indigo-300 dark:border-indigo-700 text-indigo-700 dark:text-indigo-400 font-semibold rounded-xl py-4 mb-4">+ Add Entry</button>
       </div>
 
       <button id="night-submit-btn" onclick="submitNightLog()" class="tap w-full bg-indigo-700 text-white font-bold text-lg rounded-2xl py-4 shadow-lg active:scale-[0.98] transition-transform">Submit Night Log</button>
@@ -272,7 +343,7 @@ function renderNightLog(){
     </div>`;
 }
 async function submitNightLog(){
-  if(!nightDraft.staffName.trim()){ alert("Please enter your name."); return; }
+  if(!nightDraft.staffName.trim()){ alert("Please select or enter the staff name."); return; }
   if(!nightDraft.participantId){ alert("Please select a participant."); return; }
   if(nightDraft.entries.length===0){ alert("Add at least one entry before submitting."); return; }
   localStorage.setItem("ndis-last-staff-name", nightDraft.staffName.trim());
@@ -280,11 +351,12 @@ async function submitNightLog(){
   const btn = document.getElementById("night-submit-btn");
   if(btn){ btn.disabled=true; btn.textContent="Saving…"; }
 
-  const interventions = nightDraft.entries.map(e=>({ time:e.time, reason:e.category, support:e.notes, duration:null, returnedToSleep:null }));
+  const interventions = nightDraft.entries.map(e=>({ time:e.time, reason:e.reason, duration:e.duration, notes:e.notes }));
+  const totalMinutes = interventions.reduce((s,iv)=>s+Number(iv.duration||0),0);
   const { error } = await sb.from("night_logs").insert({
     id: uid(), created_at: new Date().toISOString(), house_id: nightDraft.houseId, participant_id: nightDraft.participantId,
     staff_name: nightDraft.staffName.trim(), date: nightDraft.date, shift_start: "", shift_finish: "",
-    interventions, total_interventions: interventions.length, total_minutes: 0, overall_night: "", comments: "",
+    interventions, total_interventions: interventions.length, total_minutes: totalMinutes, overall_night: "", comments: "",
   });
   if(error){
     console.error(error);
@@ -321,7 +393,7 @@ function renderSupport(){
         ${parts.map(p=>`<option value="${p.id}" ${supportDraft.participantId===p.id?"selected":""}>${esc(p.name)}</option>`).join("")}
       </select>`)}
       ${field("Date", `<input type="date" value="${supportDraft.date}" onchange="supportDraft.date=this.value" class="${inputCls}" />`)}
-      ${field("Staff Name", `<input value="${esc(supportDraft.staffName)}" oninput="supportDraft.staffName=this.value" class="${inputCls}" placeholder="Your name" />`)}
+      ${field("Staff", staffFieldHtml("supportDraft"))}
       ${field("Activity Type", `<select onchange="supportDraft.activityType=this.value" class="${inputCls}">
         ${supportActivityTypes().map(t=>`<option ${supportDraft.activityType===t?"selected":""}>${t}</option>`).join("")}
       </select>`)}
